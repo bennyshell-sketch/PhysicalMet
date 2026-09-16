@@ -1,0 +1,59 @@
+{
+  "params": {
+    "seed": 99,
+    "n_older": 281,
+    "n_younger": 81,
+    "n_bt_substudy": 100,
+    "n_bt_decliners": 50,
+    "n_bt_stable": 50,
+    "bt_decline_log_or": 0.0,
+    "bt_slope_per_sd": 0.0,
+    "bt_subgroup_shift": 0.0,
+    "age_slope_per_decade": -0.035,
+    "male_grip_offset_kg": 12.5,
+    "grip_grand_mean_kg": 26.0,
+    "grip_between_sd_kg": 7.0,
+    "grip_slope_mean": -0.045,
+    "grip_slope_sd": 0.07,
+    "grip_residual_sd_kg": 1.9,
+    "il6_log_mean": 0.8,
+    "il6_log_sd": 0.65,
+    "sil6r_log_mean": 3.7,
+    "sil6r_log_sd": 0.28,
+    "sgp130_log_mean": 5.75,
+    "sgp130_log_sd": 0.22,
+    "female_sil6r_log_offset": 0.1,
+    "analyte_missing_rate": 0.04,
+    "subgroup_proportions": {
+      "NF": 0.57,
+      "MF": 0.16,
+      "RF": 0.01,
+      "DF": 0.04
+    },
+    "attendance": {
+      "PostFall": 1.0,
+      "SixMonth": 0.72,
+      "TwelveMonth": 0.63
+    },
+    "missing_rate_general": 0.05,
+    "tug_cannot_complete_rate": 0.06
+  },
+  "workbook": "/home/user/PhysicalMet/data/synthetic/validation/recovery_traj.xlsx",
+  "n_participants": 362,
+  "n_substudy": 100,
+  "n_substudy_cases": 50,
+  "realised": {
+    "grip_slope_mean": -0.030014018214614184,
+    "grip_slope_sd": 0.0875283434549173,
+    "mean_log_bt": -1.1358078037496604,
+    "sd_log_bt": 0.22099716525442253,
+    "n_decline_eligible": 67,
+    "n_stable_eligible": 89,
+    "marginal_slope_per_month": -0.2620331072896147,
+    "marginal_slope_per_year": -3.1443972874753765,
+    "within_slope_per_month": -0.056237153464709144,
+    "within_slope_per_year": -0.6748458415765097,
+    "n_observations": 790
+  },
+  "bt_effect_is_null": true
+}

@@ -1,0 +1,27 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Project data — never commit participant data
+data/real/*
+!data/real/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+data/synthetic/*.xlsx
+data/models/*
+!data/models/.gitkeep
+outputs/
+*.log
+.env
+
+# OS
+.DS_Store
+Thumbs.db
