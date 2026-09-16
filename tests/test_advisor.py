@@ -107,16 +107,40 @@ def test_advisor_declines_when_no_literature_could_be_retrieved():
     assert "recall" in result.reason
 
 
-def test_advisor_reports_unavailable_without_a_credential(monkeypatch):
-    import anthropic
+def test_advisor_reports_unavailable_when_no_provider_is_usable(monkeypatch):
+    import dive.providers as providers
 
-    def _explode(*args, **kwargs):
-        raise anthropic.AuthenticationError.__new__(anthropic.AuthenticationError)
-
-    monkeypatch.setattr(anthropic, "Anthropic", _explode)
+    monkeypatch.setattr(
+        providers, "available_providers",
+        lambda: [
+            {"provider": "anthropic", "available": False, "reason": "ANTHROPIC_API_KEY is not set"},
+            {"provider": "google", "available": False, "reason": "GEMINI_API_KEY is not set"},
+        ],
+    )
     available, reason = Advisor.client_available()
     assert not available
-    assert "credential" in reason
+    assert "ANTHROPIC_API_KEY" in reason and "GEMINI_API_KEY" in reason
+
+
+def test_the_advisor_never_puts_an_identifier_in_its_prompt():
+    """The end-to-end privacy contract, asserted on the exact prompt text."""
+    from dive.privacy import EgressGuard, PrivacyPolicy
+
+    profile = {
+        "participant_id": "WL042", "name": "Jane Smith", "dob": "1947-03-12",
+        "nhs_number": "943 476 5919", "age_years": 79.4, "sex": 1.0,
+        "max_grip_kg": 13.5, "gait_speed_ms": 0.62,
+    }
+    brief = brief_from_profile(profile)
+    safe, decision = EgressGuard(PrivacyPolicy()).review_profile(
+        brief.measurements | {"age_years": 79.4, "sex": "female"}, "anthropic"
+    )
+    prompt = brief.as_prompt_block(safe)
+
+    for forbidden in ("WL042", "Jane", "Smith", "1947", "943 476", "79.4"):
+        assert forbidden not in prompt
+    assert "75-79" in prompt
+    assert "13.5" in prompt
 
 
 def test_brief_contains_only_measured_values():

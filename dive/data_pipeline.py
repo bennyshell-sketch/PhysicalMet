@@ -1,7 +1,7 @@
-"""Loading, cleaning and reshaping of PORAF workbooks.
+"""Loading, cleaning and reshaping of cohort workbooks.
 
-Handles the documented quirks of the real source files so that swapping from
-synthetic to real data needs no code change:
+Handles quirks that recur across hand-maintained clinical spreadsheets, so that
+swapping from synthetic to real data needs no code change:
 
 * the 12-month sheet carries two unrelated ID columns before the real one
 * ``TUG_s == 40.0`` is a "could not complete" sentinel, not a duration
@@ -41,7 +41,7 @@ __all__ = [
 # Column alias resolution
 # --------------------------------------------------------------------------
 
-#: Canonical name -> candidate spellings found across PORAF file versions.
+#: Canonical name -> candidate spellings seen across source file versions.
 COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "participant_id": ("participant_id", "pid", "id", "wl_id", "studyid", "study_id"),
     "fall_status": ("fall_status", "faller", "fell"),
@@ -219,9 +219,9 @@ def gait_speed_ms(frame: pd.DataFrame, cols: dict[str, str], distance_m: float =
 def resolve_participant_id(frame: pd.DataFrame, sheet_name: str, report: QualityReport) -> pd.Series:
     """Find the true participant ID column.
 
-    The 12-month sheet historically carries two unrelated ID columns ahead of
-    the real one, so a naive ``iloc[:, 0]`` picks up a lab reference. Identify
-    the column by content (WL### pattern) and fall back to the documented
+    Follow-up sheets often carry lab or batch references ahead of the real ID
+    column, so a naive ``iloc[:, 0]`` picks up the wrong one. Identify the
+    column by content (the participant-ID pattern) and fall back to a
     positional index only if the pattern match is ambiguous.
     """
     pattern = re.compile(r"^WL\s*\d{2,4}$", re.IGNORECASE)
@@ -276,7 +276,7 @@ SHEET_ALIASES: dict[str, tuple[str, ...]] = {
 
 
 def load_workbook(path: Path | str, report: QualityReport | None = None) -> dict[str, pd.DataFrame]:
-    """Read a PORAF workbook and map its sheets onto canonical visit names."""
+    """Read a cohort workbook and map its sheets onto canonical visit names."""
     path = Path(path)
     if not path.exists():
         raise FileNotFoundError(
@@ -445,7 +445,7 @@ def _classify_subgroup(wide: pd.DataFrame, settings: Settings) -> pd.Series:
 
 
 def _fried_score(wide: pd.DataFrame, settings: Settings) -> pd.DataFrame:
-    """Fried 2001 phenotype, five criteria, scored on the PORAF cutpoints."""
+    """Fried 2001 frailty phenotype, five criteria, scored on the published cutpoints."""
     out = pd.DataFrame(index=wide.index)
 
     out["fried_weight_loss"] = wide.get("fried_weight_loss", pd.Series(np.nan, index=wide.index))

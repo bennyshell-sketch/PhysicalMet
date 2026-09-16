@@ -1,7 +1,7 @@
 """Dive - interface.
 
-Dive is the analysis and prediction program for the PORAF study (NCSEM,
-Loughborough). PORAF names the study and its cohort; Dive names this program.
+Dive is a clinical research platform for predicting physical function decline
+and trajectory from longitudinal cohort data.
 
 Six screens. Every one of them shows the plain-language answer before the
 statistics, and none of them shows a number the underlying model has declined
@@ -28,6 +28,9 @@ from dive.data_pipeline import build_dataset, load_dataset
 from dive.decline_model import fit_decline_model
 from dive.group_comparison import run_group_comparison
 from dive.advisor import Advisor, brief_from_profile
+from dive.privacy import ALLOWED_CLINICAL_KEYS, EgressGuard, PrivacyPolicy, deidentify_profile
+from dive.providers import available_providers
+from dive.security import AuditLog, DataVault, UploadValidator, ValidationError
 from dive.metrics import HealthMetric, MetricRegistry
 from dive.recommend import profile_from_participant, recommend_for_profile
 from dive.trajectory_model import fit_trajectory_model
@@ -85,7 +88,7 @@ def data_or_stop():
 def masthead(title: str, subtitle: str) -> None:
     st.markdown(
         f'<div class="masthead">'
-        f'<div class="eyebrow">Dive &middot; PORAF &middot; IL-6 trans-signalling</div>'
+        f'<div class="eyebrow">Dive &middot; {SETTINGS.deployment_label}</div>'
         f"<h1>{title}</h1>"
         f'<div class="sub">{subtitle}</div>'
         f"</div>",
@@ -140,15 +143,24 @@ def screen_data() -> None:
     with left:
         st.markdown(theme.section("Source"), unsafe_allow_html=True)
         uploaded = st.file_uploader(
-            "Upload a PORAF workbook", type=["xlsx", "xlsm", "xls"], label_visibility="collapsed"
+            "Upload a cohort workbook", type=["xlsx", "xlsm", "xls"], label_visibility="collapsed"
         )
         if uploaded is not None:
-            target = SETTINGS.paths.upload_dir / uploaded.name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(uploaded.getbuffer())
-            st.session_state["data_path"] = str(target)
-            st.cache_resource.clear()
-            st.success(f"Loaded {uploaded.name}")
+            # Validate before anything opens the file: size, extension, magic
+            # bytes and filename are all checked, and a failure is reported
+            # rather than worked around.
+            try:
+                payload = uploaded.getbuffer().tobytes()
+                safe_name = UploadValidator().validate_bytes(payload, uploaded.name)
+            except ValidationError as exc:
+                st.error(f"Upload rejected: {exc}")
+            else:
+                target = SETTINGS.paths.upload_dir / safe_name
+                target.parent.mkdir(parents=True, exist_ok=True)
+                target.write_bytes(payload)
+                st.session_state["data_path"] = str(target)
+                st.cache_resource.clear()
+                st.success(f"Loaded {safe_name}")
 
         columns = st.columns(2)
         if columns[0].button("Generate synthetic data", width="stretch"):
@@ -174,7 +186,7 @@ def screen_data() -> None:
         )
         st.markdown(
             f'<div class="note">Change this in <code>settings.local.yaml</code> or by setting '
-            f"<code>PORAF_DATA_SOURCE=real</code>. Nothing else needs editing.</div>",
+            f"<code>DIVE_DATA_SOURCE=real</code>. Nothing else needs editing.</div>",
             unsafe_allow_html=True,
         )
 
@@ -222,7 +234,7 @@ def screen_data() -> None:
     with tab_clean:
         st.markdown(
             '<div class="note">Each line is a correction the pipeline applied automatically. '
-            "These are the documented quirks of the PORAF workbooks.</div>",
+            "These are recurring quirks of hand-maintained clinical spreadsheets.</div>",
             unsafe_allow_html=True,
         )
         for flag in report.flags:
@@ -778,10 +790,50 @@ def screen_learning() -> None:
     data = data_or_stop()
     registry = SourceRegistry()
 
-    tab_metrics, tab_add, tab_batches, tab_search, tab_retrain, tab_models = st.tabs(
+    tab_metrics, tab_add, tab_batches, tab_search, tab_retrain, tab_auto, tab_models = st.tabs(
         ["Health metrics", "Add data", "Ingested batches", "Metric value",
-         "Retrain", "Model history"]
+         "Retrain", "Autonomous", "Model history"]
     )
+
+    with tab_auto:
+        from dive.learning import AutoLearner
+
+        learner = AutoLearner()
+        st.markdown(
+            '<div class="note">Dive can run the whole improvement cycle unattended: ingest '
+            "what has arrived, check the new data resembles the old, test whether any metric "
+            "now earns a place, retrain, and promote only what is demonstrably better. Every "
+            "stage can decline to act, and declining is the default. <b>A cycle that changes "
+            "nothing is a successful cycle</b> - the failure mode this guards against is a "
+            "system that always finds something.</div>",
+            unsafe_allow_html=True,
+        )
+        due, why = learner.due()
+        st.markdown(
+            f'<div class="caveat">{"Ready to run." if due else why}</div>',
+            unsafe_allow_html=True,
+        )
+
+        columns = st.columns(2)
+        run_dry = columns[0].button("Dry run", width="stretch")
+        run_live = columns[1].button("Run cycle now", width="stretch")
+
+        if run_dry or run_live:
+            with st.spinner("Running the improvement cycle..."):
+                outcome = learner.run_cycle(dry_run=run_dry, force=True)
+            st.markdown(
+                theme.verdict_block(
+                    outcome.summary(),
+                    tone="neutral" if outcome.changed else ("caution" if outcome.halted_at else "null"),
+                ),
+                unsafe_allow_html=True,
+            )
+            st.dataframe(outcome.to_frame(), width="stretch", hide_index=True)
+
+        history = learner.history()
+        if not history.empty:
+            st.markdown(theme.section("Recent cycles"), unsafe_allow_html=True)
+            st.dataframe(history, width="stretch", hide_index=True)
 
     with tab_metrics:
         # Named distinctly: `registry` above is the SourceRegistry used by the
@@ -974,6 +1026,206 @@ def screen_learning() -> None:
 
 
 # --------------------------------------------------------------------------
+# Screen 7 - Privacy and security
+# --------------------------------------------------------------------------
+
+def screen_privacy() -> None:
+    masthead(
+        "Privacy and security",
+        "What leaves this process, where it goes, and what is recorded about it.",
+    )
+
+    policy = SETTINGS.privacy
+    guard = EgressGuard(policy, audit_path=SETTINGS.paths.data_dir / "audit.jsonl")
+
+    tab_egress, tab_providers, tab_audit, tab_posture = st.tabs(
+        ["What leaves", "Model providers", "Audit log", "Security posture"]
+    )
+
+    # ---------------- what leaves ----------------
+    with tab_egress:
+        st.markdown(
+            theme.verdict_block(
+                "If Dive sends text to a model provider, that provider processes it. No "
+                "setting changes that. The only enforceable control is <b>what is sent</b>, "
+                "so that is what this page shows."
+            ),
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            theme.stat_row([
+                ("Egress mode", policy.egress_mode, ""),
+                ("Min cell size", str(policy.min_aggregate_n), ""),
+                ("Age banding", f"{policy.age_band_width}", "yr"),
+                ("Offline only", "yes" if policy.offline_only else "no", ""),
+            ]),
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(theme.section("See it on a real record"), unsafe_allow_html=True)
+        st.markdown(
+            '<div class="note">Pick a participant and see exactly what would be sent and '
+            "what would be withheld. This is the same function the advisor calls.</div>",
+            unsafe_allow_html=True,
+        )
+
+        data = data_or_stop()
+        participant = st.selectbox("Participant", data.wide["participant_id"].tolist())
+        row = data.wide[data.wide["participant_id"] == participant].iloc[0]
+        raw = {k: v for k, v in row.to_dict().items() if pd.notna(v)}
+
+        clean, dropped = deidentify_profile(raw)
+        left, right = st.columns(2, gap="large")
+        with left:
+            st.markdown(theme.section(f"Would be sent ({len(clean)})"), unsafe_allow_html=True)
+            st.dataframe(
+                pd.DataFrame(
+                    [{"Field": k, "Value": v} for k, v in sorted(clean.items())]
+                ),
+                width="stretch", hide_index=True,
+            )
+        with right:
+            st.markdown(theme.section(f"Withheld ({len(dropped)})"), unsafe_allow_html=True)
+            st.dataframe(
+                pd.DataFrame({"Field": dropped}), width="stretch", hide_index=True
+            )
+
+        st.markdown(
+            '<div class="caveat">De-identified is not anonymous. An unusual combination of '
+            "measurements, cross-referenced against another dataset, remains a remote "
+            "re-identification route. Set <code>egress_mode: none</code>, or point the router "
+            "at a local model, if that risk is unacceptable for your deployment.</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ---------------- providers ----------------
+    with tab_providers:
+        st.markdown(
+            '<div class="note">Every external call passes the privacy guard before a '
+            "request is made. A blocked decision means the call never happens.</div>",
+            unsafe_allow_html=True,
+        )
+        described = available_providers()
+        st.dataframe(
+            pd.DataFrame([
+                {
+                    "Provider": d["provider"],
+                    "Model": d["model"],
+                    "Usable": "yes" if d["available"] else "no",
+                    "Key": d["key_fingerprint"],
+                    "Note": d["reason"],
+                }
+                for d in described
+            ]),
+            width="stretch", hide_index=True,
+        )
+        st.markdown(
+            '<div class="caveat"><b>Local models are the zero-egress option.</b> Point '
+            "<code>DIVE_LOCAL_LLM_URL</code> at an OpenAI-compatible endpoint on your own "
+            "hardware and no participant-derived data leaves your network at all.</div>",
+            unsafe_allow_html=True,
+        )
+
+        st.markdown(theme.section("Test the guard"), unsafe_allow_html=True)
+        probe = st.text_area(
+            "Paste any text to see whether it would be allowed out",
+            value="Summarise the evidence for participant WL042, NHS 943 476 5919.",
+            height=90,
+        )
+        if st.button("Check"):
+            decision = guard.review_text(probe, destination="anthropic")
+            st.markdown(
+                theme.verdict_block(
+                    decision.explain(), tone="neutral" if decision.allowed else "stop"
+                ),
+                unsafe_allow_html=True,
+            )
+
+    # ---------------- audit ----------------
+    with tab_audit:
+        log = AuditLog(SETTINGS.paths.data_dir / "audit.jsonl")
+        intact, problems = log.verify()
+        st.markdown(
+            theme.verdict_block(
+                "The audit chain is intact - no entry has been removed or edited since it "
+                "was written."
+                if intact else
+                "The audit chain is BROKEN. Entries have been removed or altered.",
+                tone="null" if intact else "stop",
+            ),
+            unsafe_allow_html=True,
+        )
+        for problem in problems[:10]:
+            st.markdown(f'<div class="caveat">{problem}</div>', unsafe_allow_html=True)
+
+        entries = log.tail(100)
+        if not entries:
+            st.info("No audit entries yet.")
+        else:
+            st.dataframe(
+                pd.DataFrame([
+                    {
+                        "Time": e.get("ts", "")[:19].replace("T", " "),
+                        "Actor": e.get("actor", ""),
+                        "Event": e.get("event", ""),
+                        "Allowed": e.get("allowed", ""),
+                        "Bytes": e.get("bytes_out", ""),
+                        "Payload hash": str(e.get("payload_sha256", ""))[:12],
+                    }
+                    for e in reversed(entries)
+                ]),
+                width="stretch", hide_index=True,
+            )
+        st.markdown(
+            '<div class="note">Each entry stores the hash of the one before it, so a '
+            "deleted or edited line breaks the chain and is detected here. For stronger "
+            "guarantees, ship this file to append-only storage on a separate host.</div>",
+            unsafe_allow_html=True,
+        )
+
+    # ---------------- posture ----------------
+    with tab_posture:
+        vault = DataVault()
+        controls = [
+            ("Encryption at rest", vault.available,
+             "AES-GCM via DIVE_ENCRYPTION_KEY" if vault.available
+             else "DIVE_ENCRYPTION_KEY is not set - stored data is unencrypted"),
+            ("Tamper-evident audit log", intact, "hash-chained, verified on this page"),
+            ("Identifier egress blocking", True, "fail-closed scan on every outbound payload"),
+            ("Upload validation", True, "size, extension, magic bytes, path traversal, formula injection"),
+            ("Password hashing", True, "scrypt with per-password salt and lockout"),
+            ("Signed sessions", True, "HMAC-signed, expiring, constant-time verification"),
+        ]
+        st.dataframe(
+            pd.DataFrame([
+                {"Control": name, "Active": "yes" if on else "NO", "Detail": detail}
+                for name, on, detail in controls
+            ]),
+            width="stretch", hide_index=True,
+        )
+
+        st.markdown(theme.section("What this does not cover"), unsafe_allow_html=True)
+        st.markdown(
+            '<div class="note">These controls raise the cost of an attack and make a '
+            "successful one visible afterwards. They do not make Dive unbreakable, and no "
+            "software is. Before real patient data is loaded, the following sit with the "
+            "deployment and are not solvable in application code:</div>",
+            unsafe_allow_html=True,
+        )
+        for item in (
+            "TLS termination, certificate management and network isolation.",
+            "Operating system and dependency patching.",
+            "Key custody, rotation and encrypted backups with tested restores.",
+            "An independent penetration test and a threat model.",
+            "UK GDPR / DPA 2018 obligations, including a DPIA covering the model providers.",
+            "If Dive's output is used to guide care rather than research, medical device "
+            "regulation almost certainly applies (UKCA / MHRA, EU MDR). That is a "
+            "classification question to settle early, because it shapes the whole product.",
+        ):
+            st.markdown(f'<div class="caveat">{item}</div>', unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------
 # Shell
 # --------------------------------------------------------------------------
 
@@ -984,6 +1236,7 @@ SCREENS = {
     "Trajectory": screen_trajectory,
     "Recommendations": screen_recommendations,
     "Training and data": screen_learning,
+    "Privacy and security": screen_privacy,
 }
 
 
@@ -993,7 +1246,7 @@ def main() -> None:
             '<div style="font-family:Source Serif 4,Georgia,serif;font-size:1.5rem;'
             'font-weight:600;letter-spacing:-.015em;margin-bottom:.1rem;">Dive</div>'
             '<div style="font-size:.70rem;letter-spacing:.13em;text-transform:uppercase;'
-            'color:#86837A;margin-bottom:1.6rem;">PORAF &middot; B/T ratio</div>',
+            f'color:#86837A;margin-bottom:1.6rem;">{SETTINGS.deployment_label}</div>',
             unsafe_allow_html=True,
         )
         choice = st.radio("Screen", list(SCREENS), label_visibility="collapsed")

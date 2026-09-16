@@ -1,8 +1,8 @@
-"""Synthetic PORAF workbook generator.
+"""Synthetic cohort workbook generator.
 
-Produces an Excel workbook with the same sheet structure, column layout and
-data quirks as the real PORAF source files, so the whole pipeline can be built
-and validated before the ELISA data exists.
+Produces an Excel workbook with a realistic sheet structure, column layout and
+set of data quirks, so the whole pipeline can be built and validated before
+real data is available.
 
 Two things matter about the defaults:
 
@@ -211,7 +211,7 @@ def generate_workbook(
         rng.normal(74.0, 6.5, n_total).clip(cfg.cohort.older_age_threshold, 96),
         rng.normal(43.0, 11.0, n_total).clip(19, cfg.cohort.older_age_threshold - 0.1),
     )
-    # 0 = male, 1 = female (matches PORAF coding)
+    # 0 = male, 1 = female
     sex = rng.binomial(1, 0.62, n_total)
     female = sex == 1
 
@@ -582,7 +582,7 @@ def generate_workbook(
 def main() -> None:
     import argparse
 
-    parser = argparse.ArgumentParser(description="Generate the synthetic PORAF workbook.")
+    parser = argparse.ArgumentParser(description="Generate the synthetic cohort workbook.")
     parser.add_argument("--seed", type=int, default=SETTINGS.model.random_seed)
     parser.add_argument("--out", type=str, default=None)
     parser.add_argument(

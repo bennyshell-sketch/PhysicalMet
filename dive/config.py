@@ -1,15 +1,15 @@
-"""Central configuration for the PORAF B/T prediction pipeline.
+"""Central configuration for Dive.
 
 This module is the **single swap-in point** for real data. To move the whole
 pipeline from synthetic to real data, change ``DATA_SOURCE`` (here, or via the
-``PORAF_DATA_SOURCE`` environment variable, or via ``settings.local.yaml``).
+``DIVE_DATA_SOURCE`` environment variable, or via ``settings.local.yaml``).
 Nothing else in the codebase needs editing.
 
 Resolution order, lowest priority first:
     1. The defaults written in this file
     2. ``settings.yaml`` in the project root, if present
     3. ``settings.local.yaml`` in the project root, if present (gitignored)
-    4. Environment variables prefixed ``PORAF_``
+    4. Environment variables prefixed ``DIVE_``
 """
 
 from __future__ import annotations
@@ -64,9 +64,8 @@ class CohortConfig:
     """Cohort structure and clinical thresholds.
 
     ``older_age_threshold`` is 65 years: an older participant is aged 65 or
-    above. Group sizes follow the PORAF cohort (older n=281, younger n=81).
-    The value stays configurable so a reanalysis can vary it without touching
-    any analysis code.
+    above. The cohort sizes below describe the reference cohort the synthetic
+    generator reproduces; they are configurable per deployment.
     """
 
     older_age_threshold: float = 65.0
@@ -171,11 +170,11 @@ class PathConfig:
     model_dir: Path = PROJECT_ROOT / "data" / "models"
     output_dir: Path = PROJECT_ROOT / "outputs"
 
-    synthetic_workbook_name: str = "PORAF_BT_synthetic.xlsx"
-    #: Canonical real-data filenames. Drop the real files into ``real_dir``
-    #: under these names (or override the names here) and flip DATA_SOURCE.
-    real_bt_workbook_name: str = "PORAF_BT_ratio_candidate_selection_n100.xlsx"
-    real_master_workbook_name: str = "PORAF_SPSS_master_v7.xlsx"
+    synthetic_workbook_name: str = "dive_synthetic_cohort.xlsx"
+    #: Filenames Dive looks for in ``real_dir``. Override per deployment and
+    #: flip ``data_source`` to "real"; no other code changes.
+    real_bt_workbook_name: str = "cohort_biomarkers.xlsx"
+    real_master_workbook_name: str = "cohort_master.xlsx"
 
     @property
     def synthetic_workbook(self) -> Path:
@@ -191,6 +190,17 @@ class PathConfig:
 
 
 # --------------------------------------------------------------------------
+# Privacy
+# --------------------------------------------------------------------------
+
+def _default_privacy():
+    """Imported lazily: privacy imports security, which must not import config."""
+    from .privacy import PrivacyPolicy
+
+    return PrivacyPolicy()
+
+
+# --------------------------------------------------------------------------
 # Top-level settings object
 # --------------------------------------------------------------------------
 
@@ -199,7 +209,11 @@ class Settings:
     #: THE SWAP-IN POINT. "synthetic" | "real"
     data_source: DataSource = "synthetic"
 
+    #: Shown in the interface masthead. Set per deployment or per study.
+    deployment_label: str = "Clinical prediction platform"
+
     biochem: BiochemConstants = field(default_factory=BiochemConstants)
+    privacy: "PrivacyPolicy" = field(default_factory=lambda: _default_privacy())
     cohort: CohortConfig = field(default_factory=CohortConfig)
     model: ModelConfig = field(default_factory=ModelConfig)
     paths: PathConfig = field(default_factory=PathConfig)
@@ -224,14 +238,17 @@ class Settings:
 # Loading
 # --------------------------------------------------------------------------
 
-_ENV_PREFIX = "PORAF_"
+_ENV_PREFIX = "DIVE_"
 
 _SCALAR_ENV_MAP: dict[str, tuple[str, ...]] = {
     "DATA_SOURCE": ("data_source",),
+    "DEPLOYMENT_LABEL": ("deployment_label",),
     "STRICT_EVIDENCE_MODE": ("strict_evidence_mode",),
     "RANDOM_SEED": ("model", "random_seed"),
     "OLDER_AGE_THRESHOLD": ("cohort", "older_age_threshold"),
     "CONFORMAL_ALPHA": ("model", "conformal_alpha"),
+    "EGRESS_MODE": ("privacy", "egress_mode"),
+    "OFFLINE_ONLY": ("privacy", "offline_only"),
 }
 
 

@@ -7,8 +7,8 @@ distribution; the trajectory question needs the real cohort.
 
     function ~ time * (log B/T + age + sex) + (1 + time | participant)
 
-Time is **actual elapsed months**, never a visit index. PORAF visits are
-irregular by design, and treating a 4.5-month "6-month" visit as 6.0 months
+Time is **actual elapsed months**, never a visit index. Follow-up visits are
+irregular in practice, and treating a 4.5-month "6-month" visit as 6.0 months
 pushes the estimated slope toward zero.
 
 Forecasts are returned as **prediction intervals**, not confidence intervals.

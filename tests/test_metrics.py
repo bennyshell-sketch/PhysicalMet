@@ -49,27 +49,29 @@ def test_registering_twice_needs_an_explicit_overwrite(registry):
 def test_a_registered_metric_joins_the_ingestion_schema(registry):
     store, settings = registry
     store.register(HealthMetric(
-        "serum_vitamin_d", "Vitamin D", "nmol/L", "clinical", 5, 300, True, ("vit_d",)
+        "grip_fatigue_index", "Grip fatigue index", "%", "physical_function",
+        0, 100, False, ("gfi", "fatigue_index"),
     ))
     schema = effective_schema(settings)
-    assert "serum_vitamin_d" in schema
-    assert schema["serum_vitamin_d"].maximum == 300
+    assert "grip_fatigue_index" in schema
+    assert schema["grip_fatigue_index"].maximum == 100
 
-    frame = pd.DataFrame({"subject_id": ["WL001"], "vit_d": [55.0]})
+    frame = pd.DataFrame({"subject_id": ["WL001"], "gfi": [55.0]})
     mapping, unmapped = map_columns(frame, settings=settings)
-    assert mapping["vit_d"] == "serum_vitamin_d"
+    assert mapping["gfi"] == "grip_fatigue_index"
     assert unmapped == []
 
 
 def test_a_registered_metrics_range_is_enforced_on_ingestion(tmp_path, registry):
     store, settings = registry
     store.register(HealthMetric(
-        "daily_step_count", "Steps", "steps/day", "activity", 0, 40000, True, ("steps",)
+        "sleep_efficiency_pct", "Sleep efficiency", "%", "activity",
+        0, 100, True, ("sleep_eff",),
     ))
     source_file = tmp_path / "wearable.csv"
     pd.DataFrame({
         "subject_id": ["WL001", "WL002"],
-        "steps": [8000.0, 450000.0],      # second is a unit error
+        "sleep_eff": [82.0, 4100.0],       # second is a unit error
     }).to_csv(source_file, index=False)
 
     result = ingest_file(
@@ -77,7 +79,26 @@ def test_a_registered_metrics_range_is_enforced_on_ingestion(tmp_path, registry)
     )
     assert result.n_accepted == 1
     assert result.n_quarantined == 1
-    assert "daily_step_count" in result.quarantined["quarantine_reason"].iloc[0]
+    assert "sleep_efficiency_pct" in result.quarantined["quarantine_reason"].iloc[0]
+
+
+def test_imaging_metrics_ship_as_core():
+    """DEXA and CT derived measures are understood out of the box."""
+    from dive.metrics import CORE_METRICS
+
+    names = {m.name for m in CORE_METRICS}
+    for expected in ("bmd_t_score", "trabecular_bone_score", "ct_muscle_area_cm2",
+                     "ct_muscle_attenuation_hu", "vertebral_ct_density_hu"):
+        assert expected in names
+
+
+def test_imaging_ranges_reject_unit_errors():
+    """A T-score of -26 is a decimal-point error, not a patient."""
+    from dive.metrics import MetricRegistry
+
+    metric = MetricRegistry().get("bmd_t_score")
+    assert metric.plausible(-2.6)
+    assert not metric.plausible(-26.0)
 
 
 def test_registration_alone_does_not_adopt_a_metric(registry):

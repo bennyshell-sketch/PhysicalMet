@@ -1,8 +1,8 @@
 """Multi-source data ingestion.
 
 New data arrives in shapes nobody planned for: a collaborator's CSV, a second
-ELISA plate, a different cohort's SPSS export, a wearable summary. This module
-maps any of those onto the canonical PORAF schema and - critically - refuses
+assay plate, another site's SPSS export, a DEXA report, a wearable summary. This module
+maps any of those onto the canonical schema and - critically - refuses
 the rows it cannot map.
 
 The design rule is **quarantine, never coerce**. A row with a grip strength of
@@ -73,7 +73,7 @@ CANONICAL_SCHEMA: dict[str, FieldSpec] = {
     f.name: f
     for f in [
         FieldSpec("participant_id", "str", aliases=("pid", "id", "wl_id", "subject_id"), required=True,
-                  description="Study identifier, e.g. WL001"),
+                  description="Pseudonymous participant identifier"),
         FieldSpec("visit", "str", aliases=("timepoint", "wave", "visit_name"),
                   description="Baseline / PostFall / SixMonth / TwelveMonth / FM"),
         FieldSpec("elapsed_months", "float", 0, 240, ("months_since_baseline", "time_months"),

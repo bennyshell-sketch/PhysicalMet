@@ -89,7 +89,7 @@ interface never promotes it.
 
 ## Why the subgroup palette changed
 
-The PORAF plotting convention specifies `#2166ac` / `#4dac26` / `#d95f02` /
+The conventional palette for this study area specifies `#2166ac` / `#4dac26` / `#d95f02` /
 `#d62728` for the four faller subgroups. Those colours do not separate:
 
 - Recovered Function vs Declined Function: ΔE 9.7 in **normal** vision

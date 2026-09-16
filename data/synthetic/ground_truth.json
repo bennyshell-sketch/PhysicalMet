@@ -38,7 +38,7 @@
     "missing_rate_general": 0.05,
     "tug_cannot_complete_rate": 0.06
   },
-  "workbook": "/home/user/PhysicalMet/data/synthetic/PORAF_BT_synthetic.xlsx",
+  "workbook": "/home/user/PhysicalMet/data/synthetic/dive_synthetic_cohort.xlsx",
   "n_participants": 362,
   "n_substudy": 100,
   "n_substudy_cases": 50,

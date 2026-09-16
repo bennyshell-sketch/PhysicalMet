@@ -29,3 +29,7 @@ Thumbs.db
 data/ingested/
 # Registered metrics are per-deployment state, not source
 data/metrics.json
+# Runtime state and audit trail - never commit
+data/autolearn_state.json
+data/audit.jsonl
+*.enc

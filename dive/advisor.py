@@ -24,19 +24,30 @@ and it says when the retrieved evidence does not cover the person in front of
 it - an older adult with severe frailty is not well represented by a trial that
 recruited robust 65-year-olds, and it is expected to say so.
 
-Requires ``ANTHROPIC_API_KEY`` (or an ``ant auth login`` profile) and network
-access to Europe PMC or PubMed. Without either, it reports itself unavailable
-and Dive falls back to the curated library rather than guessing.
+**It never sees an identifier.** The profile is de-identified by
+``dive.privacy`` before it reaches the prompt - no participant ID, no dates, no
+name, age in 5-year bands - and the resulting text is scanned again before any
+provider is contacted. The interface shows exactly which fields were withheld.
+Setting ``egress_mode="none"`` disables profile egress entirely; pointing the
+router at a local model removes third-party processing altogether.
+
+Requires a provider key (``ANTHROPIC_API_KEY`` or ``GEMINI_API_KEY``, or a
+local endpoint) and network access to Europe PMC or PubMed. Without either, it
+reports itself unavailable and Dive falls back to the curated library rather
+than guessing.
 """
 
 from __future__ import annotations
 
 import json
 from dataclasses import dataclass, field
+import json
 from typing import Any, Sequence
 
 from .config import SETTINGS, Settings
 from .literature import LiteratureClient, LiteratureResult, Study
+from .privacy import EgressGuard, PrivacyPolicy
+from .providers import ProviderRouter
 
 __all__ = ["ParticipantBrief", "AdvisorRecommendation", "AdvisorResult", "Advisor"]
 
@@ -82,15 +93,21 @@ class ParticipantBrief:
         ordered = [t for t in terms if not (t in seen or seen.add(t))]
         return ordered or ["physical function", "older adults", "exercise"]
 
-    def as_prompt_block(self) -> str:
-        lines = ["PARTICIPANT DATA (measured values - treat as fixed and authoritative)"]
-        if self.age_years is not None:
-            lines.append(f"- age: {self.age_years:.0f} years")
-        if self.sex_label:
-            lines.append(f"- sex: {self.sex_label}")
-        for name, value in sorted(self.measurements.items()):
+    def as_prompt_block(self, safe_profile: dict[str, Any] | None = None) -> str:
+        """Render the participant block.
+
+        ``safe_profile`` is the de-identified profile returned by the egress
+        guard. When supplied it is the ONLY source of values - the raw
+        measurements never reach the prompt.
+        """
+        source = safe_profile if safe_profile is not None else self.measurements
+        lines = ["PARTICIPANT DATA (de-identified measured values - treat as authoritative)"]
+        for name, value in sorted(source.items()):
             unit = self.units.get(name, "")
-            lines.append(f"- {name}: {value:g}{(' ' + unit) if unit else ''}")
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                lines.append(f"- {name}: {value:g}{(' ' + unit) if unit else ''}")
+            else:
+                lines.append(f"- {name}: {value}")
 
         if self.finding_details:
             lines.append("")
@@ -131,7 +148,11 @@ class AdvisorResult:
     n_studies_retrieved: int = 0
     n_citations_dropped: int = 0
     model: str = MODEL
+    provider: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
+    #: Fields removed before anything left this process.
+    withheld_fields: list[str] = field(default_factory=list)
+    blocked_by_guard: bool = False
 
     def headline(self) -> str:
         if not self.available:
@@ -260,29 +281,31 @@ class Advisor:
         literature_client: LiteratureClient | None = None,
         max_studies: int = 12,
         min_year: int = 2005,
+        router: ProviderRouter | None = None,
+        guard: EgressGuard | None = None,
     ):
         self.cfg = settings or SETTINGS
         self.model = model
         self.literature = literature_client or LiteratureClient()
         self.max_studies = max_studies
         self.min_year = min_year
+        self.guard = guard or EgressGuard(
+            self.cfg.privacy, audit_path=self.cfg.paths.data_dir / "audit.jsonl"
+        )
+        self.router = router or ProviderRouter(guard=self.guard, settings=self.cfg)
 
     # -- availability -----------------------------------------------------
 
     @staticmethod
     def client_available() -> tuple[bool, str]:
-        """Is the Anthropic SDK installed and a credential resolvable?"""
-        try:
-            import anthropic  # noqa: F401
-        except ImportError:
-            return False, "the `anthropic` package is not installed (pip install anthropic)"
-        try:
-            import anthropic
+        """Is at least one model provider usable right now?"""
+        from .providers import available_providers
 
-            anthropic.Anthropic()
-        except Exception as exc:  # credential resolution failure
-            return False, f"no Anthropic credential could be resolved ({exc})"
-        return True, ""
+        described = available_providers()
+        usable = [d for d in described if d["available"]]
+        if usable:
+            return True, ""
+        return False, "; ".join(f"{d['provider']}: {d['reason']}" for d in described)
 
     # -- main -------------------------------------------------------------
 
@@ -313,54 +336,59 @@ class Advisor:
                 literature=retrieved,
             )
 
+        # --- privacy boundary: de-identify before the profile is written into
+        # any prompt. `withheld` is surfaced so the user sees what was removed.
+        safe_profile, decision = self.guard.review_profile(
+            brief.measurements | (
+                {"age_years": brief.age_years} if brief.age_years is not None else {}
+            ) | ({"sex": brief.sex_label} if brief.sex_label else {}),
+            destination=self.router.order[0] if self.router.order else "anthropic",
+        )
+        if not decision.allowed:
+            return AdvisorResult(
+                available=False,
+                reason=(
+                    "the privacy guard did not permit this profile to leave the process: "
+                    + "; ".join(decision.reasons)
+                ),
+                literature=retrieved,
+                blocked_by_guard=True,
+                withheld_fields=decision.dropped_fields,
+            )
+
         evidence_block = "\n\n".join(s.as_prompt_record() for s in retrieved.studies)
         user_content = (
-            f"{brief.as_prompt_block()}\n\n"
+            f"{brief.as_prompt_block(safe_profile)}\n\n"
             f"RETRIEVED EVIDENCE ({len(retrieved.studies)} studies - the only sources you "
             f"may cite)\n\n{evidence_block}\n\n"
             "Produce recommendations for this participant, grounded only in the studies above."
         )
 
-        try:
-            import anthropic
-
-            client = anthropic.Anthropic()
-            response = client.messages.create(
-                model=self.model,
-                max_tokens=max_tokens,
-                system=SYSTEM_PROMPT,
-                thinking={"type": "adaptive"},
-                output_config={
-                    "effort": "high",
-                    "format": {"type": "json_schema", "schema": RESPONSE_SCHEMA},
-                },
-                messages=[{"role": "user", "content": user_content}],
-            )
-        except Exception as exc:
+        response = self.router.complete(
+            system=SYSTEM_PROMPT, user=user_content,
+            schema=RESPONSE_SCHEMA, max_tokens=max_tokens,
+        )
+        if not response.ok:
             return AdvisorResult(
                 available=False,
-                reason=f"the Claude API call failed ({type(exc).__name__}: {exc})",
+                reason=response.reason,
                 literature=retrieved,
+                blocked_by_guard=response.blocked_by_guard,
+                withheld_fields=decision.dropped_fields,
             )
 
-        if getattr(response, "stop_reason", None) == "refusal":
+        payload = response.parsed if response.parsed is not None else _safe_json(response.text)
+        if payload is None:
             return AdvisorResult(
                 available=False,
-                reason="the model declined to answer this request",
+                reason="the model's response was not valid JSON",
                 literature=retrieved,
+                withheld_fields=decision.dropped_fields,
             )
 
-        text = next((b.text for b in response.content if b.type == "text"), "")
-        try:
-            payload = json.loads(text)
-        except json.JSONDecodeError as exc:
-            return AdvisorResult(
-                available=False,
-                reason=f"the model's response was not valid JSON ({exc})",
-                literature=retrieved,
-            )
-
-        return self._verify(payload, retrieved, response)
+        result = self._verify(payload, retrieved, response)
+        result.withheld_fields = decision.dropped_fields
+        return result
 
     # -- verification -----------------------------------------------------
 
@@ -395,13 +423,6 @@ class Advisor:
                 )
             )
 
-        usage = {}
-        if getattr(response, "usage", None) is not None:
-            usage = {
-                "input_tokens": getattr(response.usage, "input_tokens", None),
-                "output_tokens": getattr(response.usage, "output_tokens", None),
-            }
-
         return AdvisorResult(
             recommendations=recommendations,
             evidence_gaps=[str(g) for g in payload.get("evidence_gaps", [])],
@@ -409,8 +430,9 @@ class Advisor:
             literature=retrieved,
             n_studies_retrieved=len(retrieved.studies),
             n_citations_dropped=dropped_total,
-            model=self.model,
-            usage=usage,
+            model=getattr(response, "model", self.model),
+            provider=getattr(response, "provider", ""),
+            usage=getattr(response, "usage", {}) or {},
         )
 
 
@@ -476,3 +498,11 @@ def brief_from_profile(
         model_notes=list(model_notes),
         unassessed=list(getattr(result, "unassessed", [])),
     )
+
+
+
+def _safe_json(text: str) -> dict | None:
+    try:
+        return json.loads(text)
+    except (json.JSONDecodeError, TypeError):
+        return None

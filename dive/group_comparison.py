@@ -2,8 +2,8 @@
 
 Two tests, reported side by side:
 
-* **Kruskal-Wallis** - non-parametric, the PORAF default for continuous
-  variables that are not normally distributed.
+* **Kruskal-Wallis** - non-parametric, the default for continuous variables
+  that are not normally distributed.
 * **Gender-adjusted ANCOVA** - Type II sums of squares, with an optional
   subgroup x sex interaction, because the trans-signalling literature reports
   sex-differential sIL-6R and sgp130 concentrations.
@@ -84,7 +84,7 @@ class GroupComparisonResult:
 
 
 def _format_p(p: float) -> str:
-    """PORAF reporting convention: p < 0.001 rather than a long decimal."""
+    """Reporting convention: p < 0.001 rather than a long decimal."""
     if not np.isfinite(p):
         return "n/a"
     return "<0.001" if p < 0.001 else f"{p:.3f}"
@@ -248,7 +248,7 @@ def ancova_bt(
 # --------------------------------------------------------------------------
 
 def _describe(data: pd.DataFrame, outcome: str, group: str) -> pd.DataFrame:
-    """Median (IQR) and mean (SD) per group - PORAF reports both."""
+    """Median (IQR) and mean (SD) per group - both are reported."""
     frame = data[[outcome, group]].dropna()
     rows = []
     for name, chunk in frame.groupby(group, observed=True):

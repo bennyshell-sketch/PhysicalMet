@@ -1,15 +1,30 @@
-# PORAF pipeline settings.
+# Dive settings.
 #
 # This file is committed and holds shared defaults. For machine-specific or
 # sensitive settings create `settings.local.yaml` (gitignored), which is read
-# after this file and overrides it. Environment variables prefixed PORAF_
+# after this file and overrides it. Environment variables prefixed DIVE_
 # override both.
 
 # THE SWAP-IN POINT: "synthetic" or "real"
 data_source: synthetic
 
+# Shown in the interface masthead.
+deployment_label: "Clinical prediction platform"
+
 # Withhold predictions the models cannot support, rather than guessing.
 strict_evidence_mode: true
+
+privacy:
+  # none          - nothing participant-derived leaves this process
+  # deidentified  - clinical values only: no identifiers, no dates, banded age
+  # full          - refused by the guard; the mode exists so the choice is explicit
+  egress_mode: deidentified
+  # Absolute kill switch: no external model call of any kind.
+  offline_only: false
+  # Small-cell suppression for any aggregate that leaves.
+  min_aggregate_n: 5
+  age_band_width: 5
+  allowed_destinations: ["anthropic", "google"]
 
 cohort:
   # An older participant is aged 65 or above.

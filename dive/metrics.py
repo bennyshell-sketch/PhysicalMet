@@ -1,10 +1,19 @@
 """Registry of health metrics Dive can learn from.
 
-Dive ships with a core schema (grip, gait speed, SPPB, the IL-6 analytes, body
-composition). Anything else - a DXA field, a wearable summary, a blood marker,
-a cognitive score, a questionnaire total - is registered here at runtime and
-becomes available to ingestion, validation and model fitting without a code
-change.
+Dive ships with a core schema covering physical function, body composition,
+imaging-derived measures (DEXA bone density and CT body composition), routine
+bloods, frailty, cognition and activity. Anything else is registered here at
+runtime and becomes available to ingestion, validation and model fitting
+without a code change.
+
+A note on imaging. Dive consumes **derived measurements** - the numbers a
+radiologist, a DEXA report or a segmentation tool produces (T-score, L3
+skeletal muscle area, muscle attenuation in Hounsfield units) - not raw DICOM
+pixel data. That is a deliberate boundary. Learning directly from images needs
+sample sizes in the thousands and a segmentation pipeline that is itself a
+regulated piece of software; consuming validated derived measures gets most of
+the signal at a fraction of the risk, and keeps every predictor something a
+clinician can interrogate.
 
 Registering a metric does **not** put it into a model. It makes the metric
 *eligible*. Whether it earns a place is decided by
@@ -38,6 +47,7 @@ __all__ = ["HealthMetric", "MetricRegistry", "CORE_METRICS", "slugify"]
 MetricDomain = Literal[
     "physical_function",
     "body_composition",
+    "imaging",
     "inflammation",
     "cognition",
     "activity",
@@ -145,6 +155,57 @@ CORE_METRICS: tuple[HealthMetric, ...] = (
                  0.001, 100, None, ("bt_ratio", "b_t_ratio")),
     HealthMetric("fried_score", "Fried frailty score", "criteria", "clinical",
                  0, 5, False, ("frailty_score",)),
+
+    # --- DEXA-derived -----------------------------------------------------
+    HealthMetric("bmd_total_hip", "Bone mineral density, total hip", "g/cm2", "imaging",
+                 0.2, 1.8, True, ("bmd_hip", "total_hip_bmd"),
+                 "DEXA areal bone mineral density at the total hip"),
+    HealthMetric("bmd_femoral_neck", "Bone mineral density, femoral neck", "g/cm2", "imaging",
+                 0.2, 1.8, True, ("bmd_neck", "femoral_neck_bmd")),
+    HealthMetric("bmd_lumbar_spine", "Bone mineral density, lumbar spine", "g/cm2", "imaging",
+                 0.2, 2.2, True, ("bmd_spine", "lumbar_spine_bmd", "l1_l4_bmd")),
+    HealthMetric("bmd_t_score", "Bone density T-score", "SD", "imaging",
+                 -6.0, 4.0, True, ("t_score", "dexa_t_score"),
+                 "T-score at the lowest measured site; <= -2.5 meets the WHO osteoporosis threshold"),
+    HealthMetric("bmd_z_score", "Bone density Z-score", "SD", "imaging",
+                 -6.0, 4.0, True, ("z_score", "dexa_z_score")),
+    HealthMetric("trabecular_bone_score", "Trabecular bone score", "", "imaging",
+                 0.5, 2.0, True, ("tbs",), "DEXA texture index of trabecular microarchitecture"),
+    HealthMetric("lean_mass_kg", "Total lean mass", "kg", "imaging",
+                 15, 100, True, ("total_lean_mass", "lean_mass")),
+    HealthMetric("appendicular_lean_mass_kg", "Appendicular lean mass", "kg", "imaging",
+                 5, 50, True, ("alm", "appendicular_lean_mass")),
+
+    # --- CT-derived -------------------------------------------------------
+    HealthMetric("ct_muscle_area_cm2", "CT skeletal muscle area (L3)", "cm2", "imaging",
+                 40, 400, True, ("l3_smi_area", "skeletal_muscle_area", "smi_area"),
+                 "Cross-sectional skeletal muscle area at the third lumbar vertebra"),
+    HealthMetric("ct_muscle_attenuation_hu", "CT muscle attenuation", "HU", "imaging",
+                 -10, 80, True, ("muscle_hu", "muscle_radiodensity", "smd"),
+                 "Lower attenuation indicates greater intramuscular fat (myosteatosis)"),
+    HealthMetric("ct_vat_area_cm2", "CT visceral adipose area (L3)", "cm2", "imaging",
+                 0, 600, False, ("vat_area", "visceral_fat_area")),
+    HealthMetric("ct_sat_area_cm2", "CT subcutaneous adipose area (L3)", "cm2", "imaging",
+                 0, 900, None, ("sat_area", "subcutaneous_fat_area")),
+    HealthMetric("ct_imat_area_cm2", "CT intermuscular adipose area", "cm2", "imaging",
+                 0, 120, False, ("imat_area", "intermuscular_fat_area")),
+    HealthMetric("vertebral_ct_density_hu", "Vertebral trabecular attenuation", "HU", "imaging",
+                 20, 350, True, ("vertebral_hu", "l1_hu", "opportunistic_ct_bmd"),
+                 "Opportunistic CT screening measure; < 100 HU suggests osteoporosis"),
+    HealthMetric("aortic_calcification_score", "Aortic calcification score", "", "imaging",
+                 0, 30, False, ("aac_score", "aortic_calcium")),
+
+    # --- routine bloods ---------------------------------------------------
+    HealthMetric("crp_mg_L", "C-reactive protein", "mg/L", "inflammation",
+                 0.01, 400, False, ("crp", "c_reactive_protein")),
+    HealthMetric("albumin_g_L", "Serum albumin", "g/L", "clinical",
+                 10, 60, True, ("albumin",)),
+    HealthMetric("haemoglobin_g_L", "Haemoglobin", "g/L", "clinical",
+                 40, 220, True, ("hb", "hemoglobin", "haemoglobin")),
+    HealthMetric("serum_vitamin_d", "Serum 25-OH vitamin D", "nmol/L", "clinical",
+                 5, 400, True, ("vit_d", "vitamin_d_25oh", "25ohd")),
+    HealthMetric("daily_step_count", "Daily step count", "steps/day", "activity",
+                 0, 40000, True, ("steps", "step_count")),
     HealthMetric("moca", "MoCA", "points", "cognition", 0, 30, True, ("moca_total",)),
     HealthMetric("ipaq_coded", "IPAQ category", "1-3", "activity",
                  1, 3, True, ("ipaq_coded_category", "coded_category")),

@@ -1,12 +1,12 @@
 """Visual system for Dive.
 
-Two constraints shape this. First, output has to sit alongside existing PORAF
-material produced in Word and SPSS, so the look is print-adjacent: a warm
+Two constraints shape this. First, output has to sit alongside material
+produced in Word and SPSS, so the look is print-adjacent: a warm
 paper surface, thin rules instead of boxes, and typography doing the work that
 borders and shadows would otherwise do.
 
-Second, the subgroup palette had to change. The colours previously used for
-the four faller subgroups (#2166ac, #4dac26, #d95f02, #d62728) are not
+Second, the subgroup palette had to change. The colours conventionally used
+for the four faller subgroups (#2166ac, #4dac26, #d95f02, #d62728) are not
 separable: Recovered Function and Declined Function sit at Delta E 9.7 in
 normal vision and Maintained vs Recovered collapses to Delta E 2.8 under
 deuteranopia. Those are the two clinically opposite outcomes in the study, and
@@ -30,8 +30,8 @@ INK = "#1A1A18"            # primary text
 INK_SECONDARY = "#55534C"  # supporting text
 INK_MUTED = "#86837A"      # axis labels, captions
 
-NAVY = "#1F4E79"           # PORAF section-header navy, retained
-SIGNIFICANT = "#B3261E"    # significant p-values (PORAF convention)
+NAVY = "#1F4E79"           # section-header navy
+SIGNIFICANT = "#B3261E"    # significant p-values
 
 # --------------------------------------------------------------------------
 # Categorical palette - Okabe-Ito, validated colour-vision-deficiency safe
@@ -131,7 +131,7 @@ def plotly_layout(
 
 
 def format_p(p: float | None) -> str:
-    """PORAF convention: p < 0.001 rather than a long decimal."""
+    """Reporting convention: p < 0.001 rather than a long decimal."""
     if p is None:
         return "n/a"
     try:

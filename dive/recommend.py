@@ -140,7 +140,7 @@ def load_knowledge_base(path: str | None = None) -> dict:
 # --------------------------------------------------------------------------
 
 def _sex_key(profile: dict) -> str | None:
-    """PORAF codes sex as 0 = male, 1 = female."""
+    """Sex is coded 0 = male, 1 = female."""
     value = profile.get("sex")
     if value is None or (isinstance(value, float) and not np.isfinite(value)):
         label = str(profile.get("sex_label", "")).strip().lower()
