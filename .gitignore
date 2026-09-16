@@ -15,7 +15,8 @@ data/real/*
 !data/real/.gitkeep
 data/uploads/*
 !data/uploads/.gitkeep
-data/synthetic/*.xlsx
+data/synthetic/**/*.xlsx
+data/synthetic/validation/
 data/models/*
 !data/models/.gitkeep
 outputs/
