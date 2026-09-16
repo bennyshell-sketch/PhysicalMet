@@ -163,7 +163,7 @@ Open the folder, hold **Shift**, right-click an empty area, choose
 .\START-DIVE-windows.bat check
 ```
 
-It runs 17 validation checks and 208 tests. All passing means the installation
+It runs 17 validation checks and 253 tests. All passing means the installation
 is sound.
 
 ---

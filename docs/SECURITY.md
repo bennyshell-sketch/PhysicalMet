@@ -68,17 +68,22 @@ runs in that case, in case a "local" URL is misconfigured to a public one.
 |---|---|---|
 | Tamper-evident audit | Hash-chained JSONL; each entry carries the previous entry's SHA-256 | Deleting or editing a line is detected |
 | Audit redaction | Identifiers stripped before the record is written | Stored entries contain no identifier |
-| Encryption at rest | AES-GCM, key from `DIVE_ENCRYPTION_KEY` | Tampered ciphertext refuses to decrypt |
+| Encryption at rest | AES-GCM on uploaded cohort files, key from `DIVE_ENCRYPTION_KEY`. Derived artefacts are not covered - see below | Ciphertext is not the plaintext; a tampered file refuses to decrypt; an encrypted workbook loads identically |
 | Password storage | scrypt, per-password salt, 12-char minimum | Same password hashes differently each time |
 | Account lockout | Configurable threshold and duration | Lockout engages and reports uniformly |
-| Session tokens | HMAC-signed, expiring, constant-time compare | A client-edited role fails verification |
+| Session tokens | HMAC-signed, expiring, constant-time compare; the role is re-read from storage, never trusted from the token | A client-edited role fails verification; a disabled account's live session stops |
+| Session revocation | The token carries a fingerprint of the stored credential | Changing a password ends every session opened with the old one |
+| Host allow-list | The websocket is refused unless `Host` matches `DIVE_PUBLIC_HOSTNAME` | A request under any other name is rejected |
+| Audit visibility | The chain check is shown to everyone; the entries themselves to administrators | Entries name who signed in and what was sent where |
 | Username enumeration | Identical error and timing for unknown user and wrong password | Messages assert equal |
 | Upload validation | Size cap, extension allowlist, magic bytes, path traversal, null bytes | Each rejection asserted |
 | Formula injection | Leading `=`, `+`, `-`, `@` neutralised on export | Each prefix asserted |
 | Secret handling | Held by reference; `repr()` shows a fingerprint | Secret absent from `repr`, `str`, fingerprint |
 
 Roles: `viewer` (aggregates), `analyst` (individual records, models, ingestion),
-`admin` (users, model promotion, privacy policy, export).
+`admin` (users, model promotion, privacy policy, export, and the audit entries).
+The owner console is reachable by administrators only, and still needs the owner
+key on top of that.
 
 Run `python -m pytest tests/test_security.py tests/test_privacy.py -q` to
 exercise all of it.
@@ -108,16 +113,23 @@ These cannot be solved in application code and must be in place before real
 patient data is loaded:
 
 1. TLS termination, certificate management, and HSTS.
-2. Network isolation; Dive should not be directly internet-facing.
+2. Network isolation. [DEPLOY.md](../DEPLOY.md) describes a supported
+   internet-facing deployment - TLS at a reverse proxy, no published
+   application port, and a Host allow-list. Anything less than that should not
+   face the internet.
 3. OS and dependency patching, with a documented cadence.
 4. Key custody and rotation. `DIVE_ENCRYPTION_KEY` belongs in a secret manager,
    never in the repository, an image, or an environment file in version control.
-5. Encrypted backups **with tested restores**. An untested backup is not a backup.
-6. Shipping the audit log to append-only storage on a separate host. A
+   Lose it and the uploaded cohort files cannot be recovered.
+5. Whole-volume encryption. Dive encrypts uploaded cohort files; everything it
+   derives from them - trained models, ingested batches, the audit log - is
+   written in the clear, so the disk underneath needs to be encrypted.
+6. Encrypted backups **with tested restores**. An untested backup is not a backup.
+7. Shipping the audit log to append-only storage on a separate host. A
    hash chain detects edits; it does not survive an attacker who can rewrite
    the whole file.
-7. An independent penetration test and a written threat model.
-8. Rate limiting and DoS protection at the reverse proxy.
+8. An independent penetration test and a written threat model.
+9. Rate limiting and DoS protection at the reverse proxy.
 
 ## Governance — settle these before selling
 

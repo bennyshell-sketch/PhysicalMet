@@ -17,6 +17,7 @@ silently: a missing input stays missing and is counted in the quality report.
 
 from __future__ import annotations
 
+import io
 import re
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -27,6 +28,7 @@ import pandas as pd
 
 from .biochem import compute_bt_ratio_frame
 from .config import SETTINGS, Settings
+from .security import ENCRYPTED_SUFFIX
 
 __all__ = [
     "CleanedData",
@@ -285,7 +287,14 @@ def load_workbook(path: Path | str, report: QualityReport | None = None) -> dict
             "workbook, or set DATA_SOURCE=real and drop the real file into data/real/."
         )
 
-    excel = pd.ExcelFile(path)
+    # A workbook written through DataVault carries an .enc suffix and is
+    # decrypted into memory here, so the plaintext never returns to disk.
+    if path.name.endswith(ENCRYPTED_SUFFIX):
+        from .security import DataVault
+
+        excel = pd.ExcelFile(io.BytesIO(DataVault().read_file(path)))
+    else:
+        excel = pd.ExcelFile(path)
     available = {_norm(s): s for s in excel.sheet_names}
 
     sheets: dict[str, pd.DataFrame] = {}

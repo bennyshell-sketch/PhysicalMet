@@ -44,6 +44,7 @@ __all__ = [
     "AuditLog",
     "SecretRef",
     "DataVault",
+    "ENCRYPTED_SUFFIX",
     "PasswordHasher",
     "SessionManager",
     "UploadValidator",
@@ -201,6 +202,11 @@ class SecretRef:
 # Encryption at rest
 # --------------------------------------------------------------------------
 
+#: Appended to a filename whose contents are encrypted. Kept visible in the
+#: name so that a file on disk is never ambiguous about what it holds.
+ENCRYPTED_SUFFIX = ".enc"
+
+
 class DataVault:
     """Authenticated encryption for files at rest.
 
@@ -285,7 +291,16 @@ class DataVault:
                     f"usable here ({exc}). Install it to decrypt."
                 ) from exc
             nonce, body = blob[4:16], blob[16:]
-            return AESGCM(key).decrypt(nonce, body, associated_data)
+            try:
+                return AESGCM(key).decrypt(nonce, body, associated_data)
+            except Exception as exc:
+                # InvalidTag carries no message at all. A file that has been
+                # altered, truncated or encrypted under a different key should
+                # say so, not surface an empty exception.
+                raise ValidationError(
+                    "Ciphertext failed authentication; refusing to decrypt. The file "
+                    "has been altered or was encrypted with a different key."
+                ) from exc
         if blob.startswith(b"FALL"):
             nonce, tag, body = blob[4:20], blob[20:52], blob[52:]
             expected = hmac.new(key, nonce + body + associated_data, hashlib.sha256).digest()
@@ -313,6 +328,47 @@ class DataVault:
     def decrypt_file(self, source: Path, target: Path) -> Path:
         Path(target).write_bytes(self.decrypt(Path(source).read_bytes()))
         return Path(target)
+
+    # -- the pair the application actually uses ---------------------------
+
+    def write_file(self, payload: bytes, target: Path) -> Path:
+        """Write ``payload``, encrypted if a key is configured.
+
+        Returns the path actually written - ``target`` with ``.enc`` appended
+        when the payload was encrypted - so the caller records where the data
+        really is rather than where it asked for it to go. With no key set the
+        file is written in the clear, which is the honest outcome: pretending
+        otherwise is worse than being unencrypted.
+        """
+        target = Path(target)
+        target.parent.mkdir(parents=True, exist_ok=True)
+
+        if not self.available:
+            target.write_bytes(payload)
+            written = target
+        else:
+            written = target.with_name(target.name + ENCRYPTED_SUFFIX)
+            written.write_bytes(self.encrypt(payload))
+
+        try:
+            os.chmod(written, 0o600)
+        except OSError:
+            pass
+        return written
+
+    def read_file(self, path: Path | str) -> bytes:
+        """Read a file written by :meth:`write_file`, decrypting if needed."""
+        path = Path(path)
+        raw = path.read_bytes()
+        if path.name.endswith(ENCRYPTED_SUFFIX):
+            return self.decrypt(raw)
+        return raw
+
+    @staticmethod
+    def plain_name(path: Path | str) -> str:
+        """The filename without the encryption suffix, for extension checks."""
+        name = Path(path).name
+        return name[: -len(ENCRYPTED_SUFFIX)] if name.endswith(ENCRYPTED_SUFFIX) else name
 
 
 # --------------------------------------------------------------------------

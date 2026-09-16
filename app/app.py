@@ -21,19 +21,27 @@ import numpy as np
 import pandas as pd
 import plotly.graph_objects as go
 import streamlit as st
+from datetime import datetime, timezone
 
 from app import theme
 from dive.config import SETTINGS, ensure_directories
 from dive.data_pipeline import build_dataset, load_dataset
 from dive.decline_model import fit_decline_model
 from dive.group_comparison import run_group_comparison
+from dive.accounts import MIN_PASSWORD_LENGTH, AccountStore, bootstrap_admin
 from dive.advisor import Advisor, brief_from_profile
 from dive.owner import OwnerConsole, OwnerGate, SourceEditor
 from dive.privacy import ALLOWED_CLINICAL_KEYS, EgressGuard, PrivacyPolicy, deidentify_profile
 from dive.calibration import CalibrationStore, PhantomReading, ScannerCalibration, precision_from_repeats
 from dive.fairness import PROTECTED_ATTRIBUTES, audit_subgroups, reference_population_note, screen_features
 from dive.providers import available_providers
-from dive.security import AuditLog, DataVault, UploadValidator, ValidationError
+from dive.security import (
+    ENCRYPTED_SUFFIX,
+    AuditLog,
+    DataVault,
+    UploadValidator,
+    ValidationError,
+)
 from dive.metrics import HealthMetric, MetricRegistry
 from dive.recommend import profile_from_participant, recommend_for_profile
 from dive.trajectory_model import fit_trajectory_model
@@ -158,12 +166,22 @@ def screen_data() -> None:
             except ValidationError as exc:
                 st.error(f"Upload rejected: {exc}")
             else:
-                target = SETTINGS.paths.upload_dir / safe_name
-                target.parent.mkdir(parents=True, exist_ok=True)
-                target.write_bytes(payload)
-                st.session_state["data_path"] = str(target)
+                # Encrypted at rest when DIVE_ENCRYPTION_KEY is set; written
+                # in the clear, and said so below, when it is not.
+                written = DataVault().write_file(
+                    payload, SETTINGS.paths.upload_dir / safe_name
+                )
+                st.session_state["data_path"] = str(written)
                 st.cache_resource.clear()
-                st.success(f"Loaded {safe_name}")
+                if written.name.endswith(ENCRYPTED_SUFFIX):
+                    st.success(f"Loaded {safe_name} - stored encrypted.")
+                else:
+                    st.success(f"Loaded {safe_name}")
+                    st.markdown(
+                        '<div class="caveat">Stored unencrypted: DIVE_ENCRYPTION_KEY '
+                        "is not set on this deployment.</div>",
+                        unsafe_allow_html=True,
+                    )
 
         columns = st.columns(2)
         if columns[0].button("Generate synthetic data", width="stretch"):
@@ -1017,9 +1035,12 @@ def screen_learning() -> None:
         uploaded = st.file_uploader("Data file", type=["csv", "tsv", "xlsx", "json", "parquet"])
 
         if uploaded is not None and st.button("Ingest"):
-            target = SETTINGS.paths.upload_dir / uploaded.name
-            target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_bytes(uploaded.getbuffer())
+            safe_name = UploadValidator().validate_bytes(
+                uploaded.getbuffer().tobytes(), uploaded.name
+            )
+            target = DataVault().write_file(
+                uploaded.getbuffer().tobytes(), SETTINGS.paths.upload_dir / safe_name
+            )
             source = DataSource(source_id=source_id, label=label, kind=kind, trust=trust)
             result = ingest_file(target, source)
 
@@ -1316,38 +1337,48 @@ def screen_privacy() -> None:
         for problem in problems[:10]:
             st.markdown(f'<div class="caveat">{problem}</div>', unsafe_allow_html=True)
 
-        entries = log.tail(100)
-        if not entries:
-            st.info("No audit entries yet.")
-        else:
-            st.dataframe(
-                pd.DataFrame([
-                    {
-                        "Time": e.get("ts", "")[:19].replace("T", " "),
-                        "Actor": e.get("actor", ""),
-                        "Event": e.get("event", ""),
-                        "Allowed": e.get("allowed", ""),
-                        "Bytes": e.get("bytes_out", ""),
-                        "Payload hash": str(e.get("payload_sha256", ""))[:12],
-                    }
-                    for e in reversed(entries)
-                ]),
-                width="stretch", hide_index=True,
+        if st.session_state.get("auth_role") != "admin":
+            st.markdown(
+                '<div class="note">The chain check above is shown to everyone, because '
+                "whether the record is intact is not a secret. The entries themselves "
+                "name who signed in, when, and what was sent where, so they are "
+                "visible to administrators only.</div>",
+                unsafe_allow_html=True,
             )
-        st.markdown(
-            '<div class="note">Each entry stores the hash of the one before it, so a '
-            "deleted or edited line breaks the chain and is detected here. For stronger "
-            "guarantees, ship this file to append-only storage on a separate host.</div>",
-            unsafe_allow_html=True,
-        )
+        else:
+            entries = log.tail(100)
+            if not entries:
+                st.info("No audit entries yet.")
+            else:
+                st.dataframe(
+                    pd.DataFrame([
+                        {
+                            "Time": e.get("ts", "")[:19].replace("T", " "),
+                            "Actor": e.get("actor", ""),
+                            "Event": e.get("event", ""),
+                            "Allowed": e.get("allowed", ""),
+                            "Bytes": e.get("bytes_out", ""),
+                            "Payload hash": str(e.get("payload_sha256", ""))[:12],
+                        }
+                        for e in reversed(entries)
+                    ]),
+                    width="stretch", hide_index=True,
+                )
+            st.markdown(
+                '<div class="note">Each entry stores the hash of the one before it, so a '
+                "deleted or edited line breaks the chain and is detected here. For stronger "
+                "guarantees, ship this file to append-only storage on a separate host.</div>",
+                unsafe_allow_html=True,
+            )
 
     # ---------------- posture ----------------
     with tab_posture:
         vault = DataVault()
         controls = [
-            ("Encryption at rest", vault.available,
-             "AES-GCM via DIVE_ENCRYPTION_KEY" if vault.available
-             else "DIVE_ENCRYPTION_KEY is not set - stored data is unencrypted"),
+            ("Encryption at rest (uploads)", vault.available,
+             "AES-GCM on uploaded cohort files - see the note below for what it "
+             "does not cover" if vault.available
+             else "DIVE_ENCRYPTION_KEY is not set - uploads are stored in the clear"),
             ("Tamper-evident audit log", intact, "hash-chained, verified on this page"),
             ("Identifier egress blocking", True, "fail-closed scan on every outbound payload"),
             ("Upload validation", True, "size, extension, magic bytes, path traversal, formula injection"),
@@ -1373,6 +1404,10 @@ def screen_privacy() -> None:
         for item in (
             "TLS termination, certificate management and network isolation.",
             "Operating system and dependency patching.",
+            "Encryption at rest covers uploaded cohort files only. Everything Dive "
+            "derives from them - trained models, ingested batches, the audit log - is "
+            "written in the clear, so the volume itself needs to be on an encrypted "
+            "disk.",
             "Key custody, rotation and encrypted backups with tested restores.",
             "An independent penetration test and a threat model.",
             "UK GDPR / DPA 2018 obligations, including a DPIA covering the model providers.",
@@ -1615,8 +1650,178 @@ def screen_owner() -> None:
 
 
 # --------------------------------------------------------------------------
+# Authentication
+# --------------------------------------------------------------------------
+
+def _accounts() -> AccountStore:
+    return AccountStore()
+
+
+def screen_login() -> None:
+    """The only screen an unauthenticated visitor can reach."""
+    store = _accounts()
+
+    st.markdown(
+        '<div class="masthead">'
+        '<div class="eyebrow">Dive</div>'
+        "<h1>Sign in</h1>"
+        '<div class="sub">This deployment holds clinical data. Access is '
+        "logged.</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    if store.empty:
+        created, message = bootstrap_admin(store)
+        if created:
+            st.markdown(
+                theme.verdict_block(
+                    "First run - an administrator account has been created.",
+                    tone="caution",
+                ),
+                unsafe_allow_html=True,
+            )
+            st.code(message)
+            st.markdown(
+                '<div class="caveat">This is shown once and is not recoverable. '
+                "Copy it somewhere safe now, then sign in and change it.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            # No accounts and none created: usually DIVE_ADMIN_PASSWORD is too
+            # short. Saying so beats a sign-in form that nothing can sign in to.
+            st.error(f"No accounts exist and one could not be created. {message}")
+
+    with st.form("signin"):
+        username = st.text_input("Username")
+        password = st.text_input("Password", type="password")
+        if st.form_submit_button("Sign in"):
+            try:
+                token = store.authenticate(username, password)
+            except ValidationError as exc:
+                st.error(str(exc))
+            else:
+                st.session_state["auth_token"] = token
+                st.session_state["auth_user"] = store._normalise(username)
+                st.rerun()
+
+    if store.session_secret_is_ephemeral:
+        st.markdown(
+            '<div class="caveat"><b>DIVE_SESSION_SECRET is not set.</b> Sessions will '
+            "be invalidated whenever the server restarts, and will not work at all "
+            "across more than one instance. Set it before putting this in front of "
+            "real users.</div>",
+            unsafe_allow_html=True,
+        )
+
+
+def screen_change_password(username: str) -> None:
+    store = _accounts()
+    st.markdown(
+        '<div class="masthead"><div class="eyebrow">Dive</div>'
+        "<h1>Change your password</h1>"
+        '<div class="sub">This account still has the password it was created '
+        "with. Choose a new one before continuing.</div></div>",
+        unsafe_allow_html=True,
+    )
+
+    with st.form("change_password"):
+        first = st.text_input("New password", type="password")
+        second = st.text_input("Confirm new password", type="password")
+        if st.form_submit_button("Set password"):
+            if first != second:
+                st.error("The two passwords do not match.")
+            else:
+                try:
+                    store.set_password(username, first)
+                except ValidationError as exc:
+                    st.error(str(exc))
+                else:
+                    st.session_state.pop("auth_token", None)
+                    st.success("Password changed. Please sign in again.")
+                    st.rerun()
+
+    st.markdown(
+        f'<div class="note">At least {MIN_PASSWORD_LENGTH} characters. Longer '
+        "matters more than complicated - a passphrase of several words beats a "
+        "short string of symbols.</div>",
+        unsafe_allow_html=True,
+    )
+
+
+def screen_users() -> None:
+    """Account administration. Requires manage_users."""
+    masthead("Users", "Who can sign in, and what they may do.")
+
+    store = _accounts()
+    st.dataframe(store.to_frame(), width="stretch", hide_index=True)
+
+    st.markdown(
+        '<div class="note"><b>viewer</b> sees aggregate results only. '
+        "<b>analyst</b> additionally sees individual records, runs models and "
+        "ingests data. <b>admin</b> additionally manages users, promotes models "
+        "and changes the privacy policy.</div>",
+        unsafe_allow_html=True,
+    )
+
+    st.markdown(theme.section("Add a user"), unsafe_allow_html=True)
+    with st.form("add_user"):
+        columns = st.columns(3)
+        new_username = columns[0].text_input("Username")
+        new_password = columns[1].text_input("Temporary password", type="password")
+        new_role = columns[2].selectbox("Role", ["viewer", "analyst", "admin"])
+        if st.form_submit_button("Create"):
+            try:
+                store.create(new_username, new_password, new_role, must_change_password=True)
+            except ValidationError as exc:
+                st.error(str(exc))
+            else:
+                st.success(f"Created '{new_username}'. They must change the password at first sign-in.")
+                st.rerun()
+
+    existing = store.to_frame()
+    if not existing.empty:
+        st.markdown(theme.section("Change a user"), unsafe_allow_html=True)
+        columns = st.columns(3)
+        target = columns[0].selectbox("User", existing["User"].tolist())
+        changed_role = columns[1].selectbox("Set role to", ["viewer", "analyst", "admin"])
+        action = columns[2].selectbox("Or", ["-", "disable", "enable", "delete"])
+
+        if st.button("Apply"):
+            try:
+                if action == "-":
+                    store.set_role(target, changed_role)
+                    st.success(f"'{target}' is now {changed_role}.")
+                elif action == "delete":
+                    store.delete(target)
+                    st.success(f"Deleted '{target}'.")
+                else:
+                    store.set_disabled(target, action == "disable")
+                    st.success(f"'{target}' {action}d.")
+            except ValidationError as exc:
+                st.error(str(exc))
+            else:
+                st.rerun()
+
+
+# --------------------------------------------------------------------------
 # Shell
 # --------------------------------------------------------------------------
+
+#: The capability a user must hold to see each screen. A user without it does
+#: not get a disabled menu entry - the screen is absent, because an entry you
+#: cannot use is just an invitation to try.
+SCREEN_CAPABILITIES: dict[str, str] = {
+    "Data": "view_aggregates",
+    "Group comparison": "view_aggregates",
+    "Individual prediction": "view_individual",
+    "Trajectory": "view_individual",
+    "Recommendations": "view_individual",
+    "Training and data": "ingest_data",
+    "Users": "manage_users",
+    "Privacy and security": "view_results",
+    "Owner console": "manage_users",      # plus the owner key, checked inside
+}
+
 
 SCREENS = {
     "Data": screen_data,
@@ -1625,12 +1830,44 @@ SCREENS = {
     "Trajectory": screen_trajectory,
     "Recommendations": screen_recommendations,
     "Training and data": screen_learning,
+    "Users": screen_users,
     "Privacy and security": screen_privacy,
     "Owner console": screen_owner,
 }
 
 
 def main() -> None:
+    store = _accounts()
+
+    # ---- authentication gate. Nothing below runs without a valid session. ----
+    token = st.session_state.get("auth_token")
+    claims = None
+    if token:
+        try:
+            claims = store.verify_token(token)
+        except ValidationError as exc:
+            st.session_state.pop("auth_token", None)
+            st.warning(str(exc))
+
+    if claims is None:
+        screen_login()
+        return
+
+    st.session_state["auth_role"] = claims["role"]
+
+    account = store._load().get(claims["username"])
+    if account is not None and account.must_change_password:
+        screen_change_password(claims["username"])
+        return
+
+    permitted = [
+        name for name, capability in SCREEN_CAPABILITIES.items()
+        if name in SCREENS and store.can(token, capability)
+    ]
+    if not permitted:
+        st.error("This account has no permissions assigned. Ask an administrator.")
+        return
+
     with st.sidebar:
         st.markdown(
             '<div style="font-family:Source Serif 4,Georgia,serif;font-size:1.5rem;'
@@ -1639,7 +1876,7 @@ def main() -> None:
             f'color:#86837A;margin-bottom:1.6rem;">{SETTINGS.deployment_label}</div>',
             unsafe_allow_html=True,
         )
-        choice = st.radio("Screen", list(SCREENS), label_visibility="collapsed")
+        choice = st.radio("Screen", permitted, label_visibility="collapsed")
         st.markdown("<div style='height:2rem'></div>", unsafe_allow_html=True)
         is_real = SETTINGS.data_source == "real"
         st.markdown(
@@ -1650,6 +1887,19 @@ def main() -> None:
             f"</div>",
             unsafe_allow_html=True,
         )
+
+        st.markdown("<div style='height:1.2rem'></div>", unsafe_allow_html=True)
+        expires = datetime.fromtimestamp(claims["expires"], timezone.utc)
+        st.markdown(
+            f'<div style="font-size:.74rem;color:#86837A;line-height:1.6;">'
+            f'Signed in as <b>{claims["username"]}</b> ({claims["role"]})<br>'
+            f'Session ends {expires.strftime("%H:%M UTC")}</div>',
+            unsafe_allow_html=True,
+        )
+        if st.button("Sign out", width="stretch"):
+            st.session_state.pop("auth_token", None)
+            st.session_state.pop("owner_unlocked", None)
+            st.rerun()
 
     SCREENS[choice]()
 

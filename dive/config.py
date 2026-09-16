@@ -176,6 +176,33 @@ class PathConfig:
     real_bt_workbook_name: str = "cohort_biomarkers.xlsx"
     real_master_workbook_name: str = "cohort_master.xlsx"
 
+    def rerooted(self, data_dir: Path) -> "PathConfig":
+        """Move the writable tree under ``data_dir``.
+
+        A hosted deployment gets one writable volume, so a single setting has
+        to move everything Dive writes. Each subdirectory follows only if it
+        is still sitting at its default position under the old data directory;
+        one that was pointed somewhere else deliberately is left where it is,
+        so an explicit override is never silently overwritten.
+
+        ``output_dir`` follows too, even though its default sits beside the
+        data directory rather than inside it - in a container anything outside
+        the volume disappears on restart.
+        """
+        data_dir = Path(data_dir)
+        moves: dict[str, Any] = {"data_dir": data_dir}
+        for field_name, leaf in (
+            ("synthetic_dir", "synthetic"),
+            ("real_dir", "real"),
+            ("upload_dir", "uploads"),
+            ("model_dir", "models"),
+        ):
+            if getattr(self, field_name) == self.data_dir / leaf:
+                moves[field_name] = data_dir / leaf
+        if self.output_dir == self.project_root / "outputs":
+            moves["output_dir"] = data_dir / "outputs"
+        return replace(self, **moves)
+
     @property
     def synthetic_workbook(self) -> Path:
         return self.synthetic_dir / self.synthetic_workbook_name
@@ -261,6 +288,9 @@ _SCALAR_ENV_MAP: dict[str, tuple[str, ...]] = {
     "CONFORMAL_ALPHA": ("model", "conformal_alpha"),
     "EGRESS_MODE": ("privacy", "egress_mode"),
     "OFFLINE_ONLY": ("privacy", "offline_only"),
+    # Relocates the whole writable tree - see PathConfig.rerooted.
+    "DATA_DIR": ("paths", "data_dir"),
+    "OUTPUT_DIR": ("paths", "output_dir"),
 }
 
 
@@ -294,7 +324,12 @@ def _apply_overrides(settings: Settings, overrides: dict[str, Any]) -> Settings:
             for k, v in list(sub.items()):
                 if isinstance(getattr(current, k), Path):
                     sub[k] = Path(v)
-            top[key] = replace(current, **sub)
+            # Moving the data directory has to move what lives under it,
+            # otherwise a hosted deployment writes half its state to the
+            # volume and half to a container filesystem that is thrown away.
+            if isinstance(current, PathConfig) and "data_dir" in sub:
+                current = current.rerooted(sub.pop("data_dir"))
+            top[key] = replace(current, **sub) if sub else current
         else:
             top[key] = value
     return replace(settings, **top) if top else settings
@@ -349,6 +384,7 @@ def ensure_directories(settings: Settings | None = None) -> None:
     """Create the data/output directories the pipeline writes into."""
     cfg = settings or SETTINGS
     for directory in (
+        cfg.paths.data_dir,
         cfg.paths.synthetic_dir,
         cfg.paths.real_dir,
         cfg.paths.upload_dir,

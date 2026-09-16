@@ -18,6 +18,7 @@ be traced back to the exact rows it learned from.
 from __future__ import annotations
 
 import hashlib
+import io
 import json
 from dataclasses import dataclass, field, asdict
 from datetime import datetime, timezone
@@ -28,6 +29,7 @@ import numpy as np
 import pandas as pd
 
 from ..config import SETTINGS, Settings
+from ..security import ENCRYPTED_SUFFIX, DataVault
 
 __all__ = [
     "FieldSpec",
@@ -202,17 +204,24 @@ class IngestResult:
 # --------------------------------------------------------------------------
 
 def _read_any(path: Path, sheet: str | None = None) -> pd.DataFrame:
-    suffix = path.suffix.lower()
+    """Read a data file, decrypting it in memory first if it is stored encrypted."""
+    if path.name.endswith(ENCRYPTED_SUFFIX):
+        handle: Any = io.BytesIO(DataVault().read_file(path))
+        suffix = Path(DataVault.plain_name(path)).suffix.lower()
+    else:
+        handle = path
+        suffix = path.suffix.lower()
+
     if suffix in {".csv", ".txt"}:
-        return pd.read_csv(path)
+        return pd.read_csv(handle)
     if suffix in {".tsv"}:
-        return pd.read_csv(path, sep="\t")
+        return pd.read_csv(handle, sep="\t")
     if suffix in {".xlsx", ".xlsm", ".xls"}:
-        return pd.read_excel(path, sheet_name=sheet or 0)
+        return pd.read_excel(handle, sheet_name=sheet or 0)
     if suffix == ".json":
-        return pd.read_json(path)
+        return pd.read_json(handle)
     if suffix == ".parquet":
-        return pd.read_parquet(path)
+        return pd.read_parquet(handle)
     raise ValueError(f"Unsupported file type: {suffix}")
 
 
@@ -318,7 +327,9 @@ def ingest_file(
     if len(quarantined):
         quarantined["source_id"] = source.source_id
 
-    digest = hashlib.sha256(path.read_bytes()).hexdigest()[:12]
+    # Digest the plaintext: the same file re-uploaded must give the same batch
+    # id, and every encryption of it has a different nonce.
+    digest = hashlib.sha256(DataVault().read_file(path)).hexdigest()[:12]
     batch_id = f"{source.source_id}-{datetime.now(timezone.utc):%Y%m%dT%H%M%S}-{digest}"
 
     result = IngestResult(
