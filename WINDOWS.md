@@ -99,6 +99,31 @@ Your antivirus may also ask. It is a text file of commands — you can open
 
 ## If something goes wrong
 
+**Double-click `FIX-DIVE-windows.bat`.**
+
+It rebuilds everything from scratch, checks each step, and tells you in plain
+words what is wrong. If it cannot fix it, it opens `dive-log.txt` with the full
+details — send that file on.
+
+It is safe to run as many times as you like. It only deletes the `.venv`
+folder, which it rebuilds. Your data and settings are untouched.
+
+### What it checks, in order
+
+1. Is Python installed and on PATH
+2. Rebuilds the environment from scratch
+3. Installs every dependency
+4. Imports them all
+5. Generates the data and loads it
+6. Checks whether port 8501 is already taken
+7. Starts the app
+
+The first step that fails is the problem, and the log says which.
+
+### The specific messages
+
+## If something goes wrong (details)
+
 The window now stays open and tells you what happened. The common ones:
 
 **"Python was not found"**
