@@ -16,6 +16,7 @@ pipeline sanity check.
 
 from __future__ import annotations
 
+import warnings
 from dataclasses import dataclass, field
 from typing import Sequence
 
@@ -157,7 +158,7 @@ def ancova_bt(
     import statsmodels.api as sm
     import statsmodels.formula.api as smf
 
-    warnings: list[str] = []
+    notes: list[str] = []
     needed = [c for c in (outcome, group, covariate) if c in data.columns]
     if len(needed) < 3:
         return pd.DataFrame(), ["ANCOVA skipped: required columns missing."]
@@ -170,7 +171,7 @@ def ancova_bt(
     counts = frame[group].value_counts()
     keep = counts[counts >= 3].index
     if len(keep) < len(counts):
-        warnings.append(
+        notes.append(
             "ANCOVA: groups with n<3 dropped ("
             + ", ".join(f"{k} (n={v})" for k, v in counts[counts < 3].items())
             + ")"
@@ -178,10 +179,39 @@ def ancova_bt(
         frame = frame[frame[group].isin(keep)]
 
     if frame[group].nunique() < 2:
-        return pd.DataFrame(), warnings + ["ANCOVA skipped: fewer than two usable groups."]
+        return pd.DataFrame(), notes + ["ANCOVA skipped: fewer than two usable groups."]
 
+    # An empty subgroup x covariate cell makes the design rank-deficient, which
+    # statsmodels will fit anyway while warning that the parameters are not
+    # uniquely determined. With four faller subgroups and a small substudy that
+    # is a live possibility, so check for it and report it as a limitation
+    # rather than letting a raw warning escape to the user.
     formula = f"Q('{outcome}') ~ C(Q('{group}')) {'*' if interaction else '+'} C(Q('{covariate}'))"
-    model = smf.ols(formula, data=frame).fit()
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        model = smf.ols(formula, data=frame).fit()
+
+    design_rank = int(np.linalg.matrix_rank(model.model.exog))
+    n_params = model.model.exog.shape[1]
+    if design_rank < n_params:
+        empty = (
+            frame.groupby([group, covariate], observed=True).size().unstack(fill_value=0)
+        )
+        empty_cells = [
+            f"{row} x {column}"
+            for row in empty.index for column in empty.columns if empty.loc[row, column] == 0
+        ]
+        message = (
+            f"ANCOVA design is rank-deficient ({design_rank} of {n_params} parameters "
+            "identifiable): at least one subgroup-by-sex cell is empty"
+        )
+        if empty_cells:
+            message += " (" + ", ".join(empty_cells[:4]) + ")"
+        message += ". The adjusted F is not uniquely determined - prefer the Kruskal-Wallis result."
+        analysis_warnings_rank = [message]
+    else:
+        analysis_warnings_rank = []
+
     table = sm.stats.anova_lm(model, typ=2)
 
     # Rename the mangled patsy terms back to readable names.
@@ -205,12 +235,12 @@ def ancova_bt(
     if len(groups) >= 2 and all(len(g) >= 2 for g in groups):
         _, levene_p = stats.levene(*groups)
         if levene_p < 0.05:
-            warnings.append(
+            notes.append(
                 f"Levene's test p={_format_p(levene_p)}: group variances differ; "
                 "treat the ANCOVA F as approximate and prefer the Kruskal-Wallis result."
             )
 
-    return table, warnings
+    return table, analysis_warnings_rank + notes
 
 
 # --------------------------------------------------------------------------

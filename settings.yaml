@@ -1,0 +1,25 @@
+# PORAF pipeline settings.
+#
+# This file is committed and holds shared defaults. For machine-specific or
+# sensitive settings create `settings.local.yaml` (gitignored), which is read
+# after this file and overrides it. Environment variables prefixed PORAF_
+# override both.
+
+# THE SWAP-IN POINT: "synthetic" or "real"
+data_source: synthetic
+
+# Withhold predictions the models cannot support, rather than guessing.
+strict_evidence_mode: true
+
+cohort:
+  # The build spec quotes 65y; the confirmed PORAF protocol uses 60y
+  # (Group 0 = older adults >=60y, n=281). Defaulting to the protocol.
+  older_age_threshold: 60.0
+  grip_decline_threshold_kg: 2.0
+  tug_sentinel_value: 40.0
+
+model:
+  random_seed: 20260916
+  conformal_alpha: 0.05          # -> 95% prediction intervals
+  abstain_min_training_n: 40
+  enable_gradient_boosting: true # sensitivity check only, never the headline
