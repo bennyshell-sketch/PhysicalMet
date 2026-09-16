@@ -1,0 +1,287 @@
+# Curated intervention evidence base.
+#
+# This file is the ONLY source of recommendations. Nothing in the system
+# generates advice; the engine matches a participant's measured values against
+# the triggers below and surfaces the entries that fire, with their evidence
+# grade and citation attached. If nothing fires, nothing is recommended.
+#
+# Evidence grades
+#   A  Consistent evidence from multiple RCTs or meta-analyses
+#   B  Single good RCT, or consistent prospective observational evidence
+#   C  Mechanistic, cross-sectional, or expert-consensus only
+#   D  Insufficient or conflicting evidence - stated as such, never as advice
+#
+# `effect` is the reported magnitude in the cited source. Where a source
+# reports no reliable effect, that is recorded honestly rather than omitted.
+
+meta:
+  version: "1.0"
+  last_reviewed: "2026-09-16"
+  review_note: >
+    Thresholds follow EWGSOP2 (2019) for sarcopenia case-finding and the
+    Fried (2001) phenotype for frailty. Entries graded D exist specifically to
+    stop the engine implying evidence that does not exist.
+
+domains:
+  physical_function: Physical function and strength
+  body_composition: Body composition
+  trans_signalling: IL-6 trans-signalling and the B/T ratio
+
+interventions:
+
+  # ---------------------------------------------------------------- strength
+  - id: prt_strength
+    domain: physical_function
+    title: Progressive resistance training
+    grade: A
+    triggers:
+      - variable: max_grip_kg
+        operator: below_sex_cutoff
+        cutoffs: {male: 27.0, female: 16.0}
+        rationale: EWGSOP2 low-strength cutoff
+      - variable: sppb_total
+        operator: "<="
+        value: 9
+        rationale: SPPB 9 or below indicates mobility limitation
+    detail: >
+      Supervised progressive resistance training, 2-3 sessions per week for at
+      least 12 weeks, at moderate-to-high intensity with load increased as
+      tolerated.
+    effect: >
+      Large improvements in lower-limb strength and moderate improvements in
+      gait speed and chair-stand time. Grip strength responds less than
+      trained muscle groups, so grip may improve only modestly even when
+      function improves substantially.
+    citation: >
+      Liu CJ, Latham NK. Progressive resistance strength training for improving
+      physical function in older adults. Cochrane Database Syst Rev 2009;(3):CD002759.
+    caution: >
+      Requires screening for uncontrolled cardiovascular disease and for acute
+      musculoskeletal injury before starting.
+
+  - id: multicomponent_falls
+    domain: physical_function
+    title: Balance and functional exercise for falls prevention
+    grade: A
+    triggers:
+      - variable: gait_speed_ms
+        operator: "<"
+        value: 0.8
+        rationale: EWGSOP2 severe-sarcopenia / mobility-limitation cutoff
+      - variable: tug_cannot_complete
+        operator: "=="
+        value: 1
+        rationale: Unable to complete Timed Up and Go
+      - variable: fried_score
+        operator: ">="
+        value: 3
+        rationale: Fried frailty phenotype
+    detail: >
+      Exercise programmes that challenge balance, delivered for 3 or more hours
+      per week and continued long-term. Balance-and-functional and Tai Chi
+      programmes have the clearest effect.
+    effect: >
+      Roughly a 23% reduction in the rate of falls in community-dwelling older
+      adults (rate ratio 0.77, 95% CI 0.71 to 0.83).
+    citation: >
+      Sherrington C, et al. Exercise for preventing falls in older people living
+      in the community. Cochrane Database Syst Rev 2019;1:CD012424.
+
+  - id: chair_stand_focus
+    domain: physical_function
+    title: Sit-to-stand and lower-limb power training
+    grade: B
+    triggers:
+      - variable: chair_time_s
+        operator: ">"
+        value: 15.0
+        rationale: EWGSOP2 cutoff for 5 chair rises
+    detail: >
+      Targeted sit-to-stand practice and power-oriented lower-limb work
+      (faster concentric phase against moderate load).
+    effect: >
+      Improves chair-rise time and lower-limb power, which track daily
+      function more closely than maximal strength does.
+    citation: >
+      Cruz-Jentoft AJ, et al. Sarcopenia: revised European consensus on
+      definition and diagnosis (EWGSOP2). Age Ageing 2019;48(1):16-31.
+
+  # ------------------------------------------------------------- nutrition
+  - id: protein_intake
+    domain: physical_function
+    title: Increase dietary protein intake
+    grade: B
+    triggers:
+      - variable: max_grip_kg
+        operator: below_sex_cutoff
+        cutoffs: {male: 27.0, female: 16.0}
+        rationale: EWGSOP2 low-strength cutoff
+      - variable: bmi
+        operator: "<"
+        value: 22.0
+        rationale: Low BMI in older adults signals risk of inadequate intake
+    detail: >
+      At least 1.0-1.2 g of protein per kg body weight per day for healthy
+      older adults, rising to 1.2-1.5 g/kg/day during acute or chronic
+      illness, distributed across meals.
+    effect: >
+      Supports muscle protein synthesis. On its own the effect on strength is
+      small; the evidence is strongest when protein accompanies resistance
+      training rather than replacing it.
+    citation: >
+      Bauer J, et al. Evidence-based recommendations for optimal dietary protein
+      intake in older people: a position paper from the PROT-AGE Study Group.
+      J Am Med Dir Assoc 2013;14(8):542-559.
+    caution: >
+      Requires review of renal function before increasing protein intake in
+      chronic kidney disease.
+
+  - id: vitamin_d
+    domain: physical_function
+    title: Correct vitamin D deficiency (only where deficiency is documented)
+    grade: C
+    triggers:
+      - variable: fried_score
+        operator: ">="
+        value: 3
+        rationale: Frailty phenotype, in whom deficiency is more prevalent
+    detail: >
+      Test serum 25-hydroxyvitamin D and correct a documented deficiency with
+      standard daily dosing.
+    effect: >
+      Muscle-function benefit is confined to people who are genuinely
+      deficient at baseline. In replete individuals there is no demonstrated
+      benefit.
+    citation: >
+      Bischoff-Ferrari HA, et al. Fall prevention with supplemental and active
+      forms of vitamin D. BMJ 2009;339:b3692.
+    caution: >
+      Intermittent high-dose (bolus) vitamin D has been associated with an
+      INCREASED rate of falls and should not be used. Do not supplement
+      without a measured deficiency.
+
+  # -------------------------------------------------------- body composition
+  - id: aerobic_vat
+    domain: body_composition
+    title: Aerobic exercise to reduce visceral adipose tissue
+    grade: A
+    triggers:
+      - variable: vat_mass_g
+        operator: ">"
+        value: 1500
+        rationale: Elevated visceral fat mass
+      - variable: waist_cm
+        operator: above_sex_cutoff
+        cutoffs: {male: 102.0, female: 88.0}
+        rationale: Waist circumference indicating substantially increased risk
+    detail: >
+      Moderate-intensity aerobic exercise, at least 150 minutes per week.
+    effect: >
+      Reduces visceral adipose tissue even when total body weight changes
+      little; VAT is more exercise-responsive than subcutaneous fat.
+    citation: >
+      Verheggen RJHM, et al. A systematic review and meta-analysis on the
+      effects of exercise training versus hypocaloric diet on body composition.
+      Obes Rev 2016;17(8):664-690.
+
+  - id: combined_training_lean_mass
+    domain: body_composition
+    title: Combine resistance training with any intentional weight loss
+    grade: A
+    triggers:
+      - variable: asmi
+        operator: below_sex_cutoff
+        cutoffs: {male: 7.0, female: 5.5}
+        rationale: EWGSOP2 low appendicular skeletal muscle mass index
+      - variable: bmi
+        operator: ">="
+        value: 30.0
+        rationale: Obesity, where weight loss is often pursued
+    detail: >
+      Where weight loss is being attempted, pair it with resistance training
+      and adequate protein rather than caloric restriction alone.
+    effect: >
+      Caloric restriction alone costs roughly 20-30% of lost weight as lean
+      mass. Adding resistance training substantially preserves lean mass and
+      protects physical function during weight loss.
+    citation: >
+      Villareal DT, et al. Aerobic or resistance exercise, or both, in dieting
+      obese older adults. N Engl J Med 2017;376(20):1943-1955.
+    caution: >
+      Unintentional weight loss is a frailty criterion and must be
+      investigated clinically, not treated as a target.
+
+  # ------------------------------------------------------ trans-signalling
+  - id: exercise_il6
+    domain: trans_signalling
+    title: Regular exercise training to lower basal IL-6
+    grade: B
+    triggers:
+      - variable: IL6_pg_mL
+        operator: ">"
+        value: 3.0
+        rationale: Elevated resting IL-6 relative to typical older-adult values
+    detail: >
+      Regular aerobic and resistance training, sustained over months. The
+      target is resting IL-6, not the acute response.
+    effect: >
+      Modest reductions in resting circulating IL-6 in older adults. Note that
+      a single bout of exercise transiently RAISES IL-6 several-fold, because
+      contracting muscle releases it as a myokine. That acute rise is a normal
+      physiological response and is not the inflammatory signal of interest;
+      samples must be taken at rest.
+    citation: >
+      Pedersen BK, Febbraio MA. Muscle as an endocrine organ: focus on
+      muscle-derived interleukin-6. Physiol Rev 2008;88(4):1379-1406.
+
+  - id: adiposity_il6
+    domain: trans_signalling
+    title: Reduce visceral adiposity to lower the IL-6 source
+    grade: B
+    triggers:
+      - variable: vat_mass_g
+        operator: ">"
+        value: 1500
+        rationale: Visceral adipose tissue is a major source of circulating IL-6
+      - variable: IL6_pg_mL
+        operator: ">"
+        value: 3.0
+        rationale: Elevated resting IL-6
+    detail: >
+      Reduce visceral adipose tissue through aerobic exercise and dietary
+      change.
+    effect: >
+      Visceral adipose tissue is a substantial contributor to circulating
+      IL-6, and reductions in VAT are accompanied by reductions in IL-6.
+    citation: >
+      Fontana L, et al. Visceral fat adipokine secretion is associated with
+      systemic inflammation in obese humans. Diabetes 2007;56(4):1010-1013.
+
+  - id: bt_ratio_direct
+    domain: trans_signalling
+    title: Directly shifting the B/T ratio
+    grade: D
+    triggers:
+      - variable: BT_ratio
+        operator: "is_present"
+        rationale: Shown whenever a B/T ratio has been measured
+    detail: >
+      No lifestyle or exercise intervention has been shown to shift the
+      B/T ratio itself.
+    effect: >
+      INSUFFICIENT EVIDENCE. The B/T ratio is determined by the relative
+      concentrations of IL-6, sIL-6R and sgp130. Interventions that lower
+      IL-6 change the absolute amount of complex formed, but the ratio of
+      binary to ternary complex is governed by free sgp130, and there is no
+      trial evidence that any lifestyle intervention reliably alters sgp130 or
+      sIL-6R concentrations in older adults. Any recommendation framed as
+      "lowering your B/T ratio" would be unsupported.
+    citation: >
+      No adequate interventional evidence identified. Mechanistic basis:
+      Garbers C, et al. Interleukin-6: designing specific therapeutics for a
+      complex cytokine. Nat Rev Drug Discov 2018;17(6):395-412.
+    caution: >
+      Pharmacological IL-6 pathway blockade (for example tocilizumab) is a
+      licensed therapy for specific inflammatory conditions and is not a
+      lifestyle intervention. It is out of scope here and must not be inferred
+      from this entry.
