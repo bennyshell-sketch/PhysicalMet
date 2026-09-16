@@ -10,7 +10,10 @@ cd dive
 ./run.sh
 ```
 
-On Windows, double-click `run.bat` instead.
+The repository is private, so cloning will ask for your GitHub credentials.
+
+**On Windows, see [WINDOWS.md](WINDOWS.md)** — step by step, no terminal
+needed.
 
 First run takes a few minutes: it builds a local environment, installs
 dependencies and generates a synthetic cohort. After that it starts in seconds.
