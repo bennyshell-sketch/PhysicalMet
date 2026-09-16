@@ -63,13 +63,13 @@ class BiochemConstants:
 class CohortConfig:
     """Cohort structure and clinical thresholds.
 
-    ``older_age_threshold`` defaults to 60 years, matching the confirmed PORAF
-    protocol (Group 0 = older adults >=60y, n=281; Group 1 = younger adults
-    <60y, n=78). The build spec quotes 65y; the value is configurable here so
-    the two can be reconciled without touching analysis code.
+    ``older_age_threshold`` is 65 years: an older participant is aged 65 or
+    above. Group sizes follow the PORAF cohort (older n=281, younger n=81).
+    The value stays configurable so a reanalysis can vary it without touching
+    any analysis code.
     """
 
-    older_age_threshold: float = 60.0
+    older_age_threshold: float = 65.0
 
     n_older: int = 281
     n_younger: int = 81
@@ -138,7 +138,7 @@ class ModelConfig:
     # Conformal prediction (distribution-free interval coverage)
     conformal_alpha: float = 0.05
 
-    # Abstention guardrails - see poraf_bt/guardrails.py
+    # Abstention guardrails - see dive/guardrails.py
     #: Refuse to predict if a covariate sits outside this quantile range of
     #: the training data (Mahalanobis/extrapolation check).
     abstain_extrapolation_quantile: float = 0.99
@@ -312,7 +312,7 @@ def load_settings(config_file: Path | str | None = None) -> Settings:
 #: Module-level singleton used throughout the pipeline.
 SETTINGS = load_settings()
 
-# Convenience aliases so callers can write ``from poraf_bt.config import DATA_SOURCE``
+# Convenience aliases so callers can write ``from dive.config import DATA_SOURCE``
 DATA_SOURCE: DataSource = SETTINGS.data_source
 
 

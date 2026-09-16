@@ -121,3 +121,66 @@ from one produced by a model that works, and it would be acted on. Given that
 the prior RFU analysis on this same pathway also found nothing, the realistic
 case is that the real data behaves similarly — so the abstention path is the
 one most likely to matter in practice, and it is tested accordingly.
+
+
+## Why the feature search permutes the whole search, not one feature
+
+Testing whether a single named metric helps is easy: fit with and without it,
+compare on held-out data. Testing *twenty candidate metrics and keeping the
+best* is a different problem, and the difference is not a detail.
+
+The maximum of twenty noisy AUC estimates is biased upward. Even when every
+candidate is pure noise, the best of them will look like an improvement, and
+the more metrics you offer the system the more reliably it will find one. A
+system that adopts on a plain threshold gets more confident and more wrong as
+its data grows — which is the exact opposite of the behaviour "learns and
+improves" is supposed to mean.
+
+Measured on Dive's own synthetic data: six metrics drawn from
+`np.random.normal` produced a best apparent gain of **+0.098 AUC**. That clears
+any sensible fixed threshold.
+
+The fix is to make the null distribution match the procedure. Shuffle the
+outcome labels, re-run the entire search including the selection step, and
+record the best improvement it finds. Repeat. The resulting p-value answers:
+*how large an improvement would this search have found if none of these metrics
+carried signal?* For those six noise metrics it returns p = 0.31 — correctly
+refusing. For a genuinely informative biomarker hidden among five decoys it
+returns +0.401 at p = 0.012 — correctly adopting.
+
+The cost is `n_permutations x n_candidates` model fits. That cost is the
+feature, not an overhead to optimise away.
+
+## Why the advisor cannot cite a paper that does not exist
+
+The failure mode being designed against is specific. Asked to support a
+recommendation with literature, a language model will produce a citation with a
+real journal, plausible authors, a well-formed DOI and a title that reads
+exactly like a paper in that field — and no such paper exists. It is not
+detectable by inspection, and in a thesis context it is a serious problem.
+
+Prompting alone does not fix it. "Only cite real papers" is an instruction the
+model already believes it is following.
+
+The architecture removes the capability instead:
+
+1. `dive/literature.py` retrieves studies from Europe PMC or PubMed. These are
+   real records with identifiers that resolve.
+2. Only those records are placed in the prompt, and the system prompt states
+   they are the only citable sources.
+3. `Advisor._verify` intersects every returned identifier with the retrieved
+   set. Non-members are discarded. A recommendation left with no verified
+   source is dropped entirely, not shown with a warning.
+
+Step 3 is the one that does the work — steps 1 and 2 make compliance easy, but
+step 3 is what makes non-compliance harmless. `tests/test_advisor.py` exercises
+it with a fabricated PMID mixed among real ones.
+
+The same principle covers participant facts: measurements are passed in as a
+fixed block and the model is told to state no number that is not in it, so a
+"recommendation" can never rest on an invented measurement.
+
+One consequence worth stating plainly: when retrieval fails, Dive does not fall
+back on the model's recall. It reports the advisor unavailable. A system that
+degrades from *retrieved evidence* to *remembered evidence* without saying so
+is worse than one that simply stops.

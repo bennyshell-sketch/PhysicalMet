@@ -32,6 +32,7 @@ from ..config import SETTINGS, Settings
 __all__ = [
     "FieldSpec",
     "CANONICAL_SCHEMA",
+    "effective_schema",
     "DataSource",
     "IngestResult",
     "SourceRegistry",
@@ -113,10 +114,34 @@ def _normalise(name: object) -> str:
     return re.sub(r"_+", "_", text).strip("_")
 
 
-def build_alias_index() -> dict[str, str]:
+def effective_schema(settings: Settings | None = None) -> dict[str, FieldSpec]:
+    """The canonical schema plus every registered health metric.
+
+    This is what makes Dive extensible: a metric registered through
+    ``dive.metrics.MetricRegistry`` becomes ingestable immediately, with its
+    own plausible range enforced, without any change to this module.
+    """
+    from ..metrics import MetricRegistry
+
+    schema = dict(CANONICAL_SCHEMA)
+    for metric in MetricRegistry(settings).all().values():
+        if metric.name in schema:
+            continue
+        schema[metric.name] = FieldSpec(
+            name=metric.name,
+            dtype="float",
+            minimum=metric.minimum,
+            maximum=metric.maximum,
+            aliases=tuple(metric.aliases),
+            description=metric.description or metric.label,
+        )
+    return schema
+
+
+def build_alias_index(settings: Settings | None = None) -> dict[str, str]:
     """Reverse index from any accepted spelling to its canonical field name."""
     index: dict[str, str] = {}
-    for spec in CANONICAL_SCHEMA.values():
+    for spec in effective_schema(settings).values():
         index[_normalise(spec.name)] = spec.name
         for alias in spec.aliases:
             index[_normalise(alias)] = spec.name
@@ -192,7 +217,9 @@ def _read_any(path: Path, sheet: str | None = None) -> pd.DataFrame:
 
 
 def map_columns(
-    frame: pd.DataFrame, explicit: dict[str, str] | None = None
+    frame: pd.DataFrame,
+    explicit: dict[str, str] | None = None,
+    settings: Settings | None = None,
 ) -> tuple[dict[str, str], list[str]]:
     """Map incoming columns onto canonical names.
 
@@ -200,7 +227,7 @@ def map_columns(
     index cannot. Returns ``(mapping, unmapped)`` where mapping is
     ``{incoming_column: canonical_name}``.
     """
-    index = build_alias_index()
+    index = build_alias_index(settings)
     mapping: dict[str, str] = {}
     unmapped: list[str] = []
 
@@ -217,19 +244,22 @@ def map_columns(
     return mapping, unmapped
 
 
-def validate_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
+def validate_frame(
+    frame: pd.DataFrame, settings: Settings | None = None
+) -> tuple[pd.DataFrame, pd.DataFrame, list[str]]:
     """Split a canonical-named frame into accepted and quarantined rows.
 
     A row is quarantined if any present value falls outside its field's
     plausibility range, or if a required field is missing. The reason is
     recorded on the quarantined row rather than discarded.
     """
+    schema = effective_schema(settings)
     issues: list[str] = []
     working = frame.copy()
     reasons: list[list[str]] = [[] for _ in range(len(working))]
 
     for column in working.columns:
-        spec = CANONICAL_SCHEMA.get(column)
+        spec = schema.get(column)
         if spec is None or spec.dtype not in {"float", "int"}:
             continue
         values = pd.to_numeric(working[column], errors="coerce")
@@ -246,7 +276,7 @@ def validate_frame(frame: pd.DataFrame) -> tuple[pd.DataFrame, pd.DataFrame, lis
                 )
         working[column] = values
 
-    for name, spec in CANONICAL_SCHEMA.items():
+    for name, spec in schema.items():
         if not spec.required:
             continue
         if name not in working.columns:
@@ -277,12 +307,13 @@ def ingest_file(
     path = Path(path)
     raw = _read_any(path, sheet)
 
-    mapping, unmapped = map_columns(raw, source.column_map)
+    mapping, unmapped = map_columns(raw, source.column_map, settings=cfg)
     renamed = raw.rename(columns=mapping)
-    # Keep only canonical columns; unmapped ones are reported, not smuggled in.
-    canonical = renamed[[c for c in renamed.columns if c in CANONICAL_SCHEMA]].copy()
+    # Keep only schema columns; unmapped ones are reported, not smuggled in.
+    schema = effective_schema(cfg)
+    canonical = renamed[[c for c in renamed.columns if c in schema]].copy()
 
-    accepted, quarantined, issues = validate_frame(canonical)
+    accepted, quarantined, issues = validate_frame(canonical, settings=cfg)
     accepted["source_id"] = source.source_id
     if len(quarantined):
         quarantined["source_id"] = source.source_id

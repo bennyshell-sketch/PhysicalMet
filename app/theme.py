@@ -1,4 +1,4 @@
-"""Visual system for the PORAF interface.
+"""Visual system for Dive.
 
 Two constraints shape this. First, output has to sit alongside existing PORAF
 material produced in Word and SPSS, so the look is print-adjacent: a warm

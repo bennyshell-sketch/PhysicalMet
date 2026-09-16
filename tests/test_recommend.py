@@ -2,7 +2,7 @@
 
 import pytest
 
-from poraf_bt.recommend import load_knowledge_base, recommend_for_profile
+from dive.recommend import load_knowledge_base, recommend_for_profile
 
 FRAIL = {
     "sex": 1.0, "age_years": 79, "max_grip_kg": 13.5, "gait_speed_ms": 0.62,

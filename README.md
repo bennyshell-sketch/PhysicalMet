@@ -1,8 +1,10 @@
-# PORAF B/T Ratio Prediction Pipeline
+# Dive
 
-Analysis pipeline and interface for the PORAF study (NCSEM, Loughborough),
+Analysis and prediction program for the PORAF study (NCSEM, Loughborough),
 investigating whether the IL-6 trans-signalling **B/T ratio** predicts physical
 function decline and trajectory in older adults.
+
+PORAF names the study and its cohort. Dive names this program.
 
 The ELISA data does not exist yet. Everything here is built and validated
 against synthetic data that matches the real workbook schema, so that when the
@@ -15,8 +17,8 @@ real file arrives you change **one configuration value** and nothing else.
 ```bash
 pip install -r requirements.txt
 
-python -m poraf_bt.generate_synthetic_data   # create the synthetic workbook
-python -m poraf_bt.validation                # 17 correctness checks
+python -m dive.generate_synthetic_data   # create the synthetic workbook
+python -m dive.validation                # 17 correctness checks
 streamlit run app/app.py                     # open the interface
 ```
 
@@ -37,12 +39,12 @@ This is the only change required.
    # settings.local.yaml (gitignored)
    data_source: real
    ```
-   or edit the `data_source` default in `poraf_bt/config.py`.
+   or edit the `data_source` default in `dive/config.py`.
 
 3. Run as normal.
 
 If the real file uses different column or sheet names, add them to
-`COLUMN_ALIASES` / `SHEET_ALIASES` in `poraf_bt/data_pipeline.py`. No analysis
+`COLUMN_ALIASES` / `SHEET_ALIASES` in `dive/data_pipeline.py`. No analysis
 code changes. Filenames themselves are configurable under `PathConfig`.
 
 **Before trusting the first real-data run**, check the *Cleaning actions* tab
@@ -55,16 +57,19 @@ workbook has a quirk that isn't handled, it shows up there as a surprise.
 
 | Module | Responsibility |
 |---|---|
-| `poraf_bt/biochem.py` | Two-step equilibrium solved numerically for the B/T ratio |
-| `poraf_bt/generate_synthetic_data.py` | Synthetic workbook + ground-truth sidecar |
-| `poraf_bt/data_pipeline.py` | Loading, cleaning, reshaping, quality reporting |
-| `poraf_bt/group_comparison.py` | Kruskal-Wallis + sex-adjusted ANCOVA |
-| `poraf_bt/decline_model.py` | Primary logistic model; gradient boosting as sensitivity only |
-| `poraf_bt/trajectory_model.py` | Mixed-effects trajectory + individual prediction intervals |
-| `poraf_bt/guardrails.py` | Abstention: extrapolation and interval-width checks |
-| `poraf_bt/recommend.py` | Evidence-matched recommendations from a curated library |
-| `poraf_bt/learning/` | Multi-source ingestion, model registry, gated retraining |
-| `poraf_bt/validation.py` | The correctness harness |
+| `dive/biochem.py` | Two-step equilibrium solved numerically for the B/T ratio |
+| `dive/metrics.py` | Registry of health metrics Dive can ingest and test |
+| `dive/generate_synthetic_data.py` | Synthetic workbook + ground-truth sidecar |
+| `dive/data_pipeline.py` | Loading, cleaning, reshaping, quality reporting |
+| `dive/group_comparison.py` | Kruskal-Wallis + sex-adjusted ANCOVA |
+| `dive/decline_model.py` | Primary logistic model; gradient boosting as sensitivity only |
+| `dive/trajectory_model.py` | Mixed-effects trajectory + individual prediction intervals |
+| `dive/guardrails.py` | Abstention: extrapolation and interval-width checks |
+| `dive/recommend.py` | Evidence-matched recommendations from a curated library |
+| `dive/literature.py` | Retrieval of real, verifiable studies + citation verification |
+| `dive/advisor.py` | Participant-specific advice grounded in retrieved evidence |
+| `dive/learning/` | Multi-source ingestion, registry, gated retraining, feature search |
+| `dive/validation.py` | The correctness harness |
 | `app/` | Streamlit interface |
 
 ### The B/T ratio
@@ -120,7 +125,7 @@ interval covers the group mean; a forecast for one person needs the between-
 participant and residual variance too. Held-out coverage of the nominal 95%
 interval measures 95.2%.
 
-**Recommendations are matched, not generated.** `poraf_bt/knowledge/interventions.yaml`
+**Recommendations are matched, not generated.** `dive/knowledge/interventions.yaml`
 is the only source. An entry appears only when a real measurement fires an
 explicit trigger, and carries its evidence grade (A–D) and citation. Where the
 evidence does not exist, the library says so: no intervention has been shown to
@@ -129,12 +134,94 @@ quietly omitted or softened into advice.
 
 ---
 
+## Adding any health metric
+
+Dive is not limited to the measurements it ships with. Register a metric and it
+becomes ingestable immediately, with its plausible range enforced:
+
+```python
+from dive.metrics import HealthMetric, MetricRegistry
+
+MetricRegistry().register(HealthMetric(
+    name="serum_vitamin_d", label="Serum 25-OH vitamin D", unit="nmol/L",
+    domain="clinical", minimum=5, maximum=300, higher_is_better=True,
+    aliases=("vit_d", "vitamin_d_25oh"),
+))
+```
+
+Incoming files using any registered alias now map automatically, and values
+outside the plausible range are quarantined as unit errors rather than learned.
+
+**Registering a metric does not put it into a model.** It makes the metric
+eligible. Whether it earns a place is decided on held-out participants:
+
+```python
+from dive.learning import search_features
+result = search_features(data.substudy, n_permutations=200)
+print(result.verdict)
+```
+
+This is the part that is easy to get wrong. Try twenty metrics, keep whichever
+raises cross-validated AUC the most, and you will find an improvement almost
+every time — because the maximum of twenty noisy estimates is biased upward
+even when all twenty are pure noise. On Dive's own synthetic data, a metric
+drawn from `np.random.normal` raised AUC by **+0.098**, which would clear any
+plain threshold.
+
+So the null is built from the *whole search*: the outcome labels are shuffled
+and the entire selection — including "pick the best candidate" — is re-run.
+That answers the question that actually matters, and it rejects the noise
+metric (p = 0.31) while adopting a genuinely informative one (+0.401,
+p = 0.012).
+
+A metric is adopted only if it clears a minimum effect size, has enough
+coverage to be evaluated, and beats that selection-level null.
+
+---
+
+## The evidence advisor
+
+The curated library in `dive/recommend.py` fires on fixed thresholds and
+returns the same wording for anyone who crosses them. The advisor
+(`dive/advisor.py`) is the participant-specific layer: it reasons about *this*
+combination of values and says where the trial populations differ from the
+person in front of it.
+
+It uses the Claude API, which makes fabricated citations the obvious risk. A
+model asked to cite literature produces references that look correct in every
+respect — plausible authors, a real journal, a well-formed DOI — and do not
+exist. Three things make that structurally impossible here:
+
+1. **The model never supplies a citation.** Studies are retrieved first from
+   Europe PMC (falling back to PubMed), restricted to systematic reviews,
+   meta-analyses, trials and cohort studies with abstracts.
+2. **Only retrieved records are passed in**, and the model is instructed it may
+   cite nothing else.
+3. **Every identifier it returns is checked against the retrieved set.**
+   Anything else is discarded, and a recommendation left with no verifiable
+   source is dropped entirely. The interface reports how many were discarded.
+
+The model also never supplies a fact about the participant — measurements come
+from the pipeline as a fixed block — and it is instructed not to forecast, because
+the decline and trajectory models own prediction, including the decision to
+abstain.
+
+Requires `ANTHROPIC_API_KEY` (or an `ant auth login` profile) and network access
+to Europe PMC or PubMed. Without either, the advisor reports itself unavailable
+and Dive falls back to the curated library. It will not write advice from recall.
+
+```bash
+export ANTHROPIC_API_KEY=sk-ant-...
+```
+
+---
+
 ## Training it on new data
 
 The `Training and data` screen, or the API:
 
 ```python
-from poraf_bt.learning import DataSource, ingest_file, retrain_and_evaluate
+from dive.learning import DataSource, ingest_file, retrain_and_evaluate
 
 source = DataSource(source_id="partner_a", label="Partner Cohort A",
                     kind="cohort", trust=0.8)
@@ -167,8 +254,8 @@ cohort may legitimately differ, and the point is that you are told.
 ## Validation
 
 ```bash
-python -m poraf_bt.validation     # 17 checks
-python -m pytest tests/ -q        # 56 tests
+python -m dive.validation     # 17 checks
+python -m pytest tests/ -q        # 72 tests
 ```
 
 Four families of check:
@@ -195,9 +282,12 @@ Four families of check:
   36F/14M and 34F/16M; the generator produces about 29F/21M and 30F/20M because
   case selection follows simulated grip decline rather than being imposed. The
   mechanism is honest; the exact split is not matched.
-- **The `older_age_threshold` differs between sources.** The build spec says
-  65y; the confirmed PORAF protocol says 60y (Group 0, n=281). The config
-  defaults to 60 and the value is configurable.
+- **The advisor's literature retrieval is untested against the live APIs.**
+  The environment it was built in blocks Europe PMC and PubMed (403), so
+  retrieval, query construction and the Claude call have not been exercised
+  end-to-end. The citation-verification logic — the part that matters — is
+  tested offline against fabricated identifiers. Run it once with network
+  access before relying on it.
 - **Sample size does not support deep learning**, and nothing here attempts it.
   Mixed models and logistic regression are primary; gradient boosting is a
   labelled sensitivity check only.

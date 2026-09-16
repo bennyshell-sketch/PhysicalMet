@@ -7,15 +7,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from poraf_bt.learning.ingest import (
+from dive.learning.ingest import (
     DataSource,
     SourceRegistry,
     ingest_file,
     map_columns,
     validate_frame,
 )
-from poraf_bt.learning.registry import ModelRegistry
-from poraf_bt.learning.retrain import detect_drift, retrain_and_evaluate
+from dive.learning.registry import ModelRegistry
+from dive.learning.retrain import detect_drift, retrain_and_evaluate
 
 
 @pytest.fixture
@@ -23,7 +23,7 @@ def isolated(tmp_path, monkeypatch):
     """Point the registries at a temp directory so tests never touch real data."""
     from dataclasses import replace
 
-    from poraf_bt import config
+    from dive import config
 
     paths = replace(config.SETTINGS.paths, data_dir=tmp_path, model_dir=tmp_path / "models")
     settings = replace(config.SETTINGS, paths=paths)

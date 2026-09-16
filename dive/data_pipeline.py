@@ -281,7 +281,7 @@ def load_workbook(path: Path | str, report: QualityReport | None = None) -> dict
     if not path.exists():
         raise FileNotFoundError(
             f"Workbook not found: {path}\n"
-            "Run `python -m poraf_bt.generate_synthetic_data` to create the synthetic "
+            "Run `python -m dive.generate_synthetic_data` to create the synthetic "
             "workbook, or set DATA_SOURCE=real and drop the real file into data/real/."
         )
 

@@ -15,7 +15,7 @@ Checks that the pipeline is *correct*, not merely that it runs. Four families:
    about 95% of the time. An interval that covers 60% is a lie about
    uncertainty; one that covers 100% is useless.
 
-Run everything with ``python -m poraf_bt.validation``.
+Run everything with ``python -m dive.validation``.
 """
 
 from __future__ import annotations

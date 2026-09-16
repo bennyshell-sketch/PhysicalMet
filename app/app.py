@@ -1,4 +1,7 @@
-"""PORAF B/T Ratio Analysis - interface.
+"""Dive - interface.
+
+Dive is the analysis and prediction program for the PORAF study (NCSEM,
+Loughborough). PORAF names the study and its cohort; Dive names this program.
 
 Six screens. Every one of them shows the plain-language answer before the
 statistics, and none of them shows a number the underlying model has declined
@@ -20,15 +23,17 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from app import theme
-from poraf_bt.config import SETTINGS, ensure_directories
-from poraf_bt.data_pipeline import build_dataset, load_dataset
-from poraf_bt.decline_model import fit_decline_model
-from poraf_bt.group_comparison import run_group_comparison
-from poraf_bt.recommend import profile_from_participant, recommend_for_profile
-from poraf_bt.trajectory_model import fit_trajectory_model
+from dive.config import SETTINGS, ensure_directories
+from dive.data_pipeline import build_dataset, load_dataset
+from dive.decline_model import fit_decline_model
+from dive.group_comparison import run_group_comparison
+from dive.advisor import Advisor, brief_from_profile
+from dive.metrics import HealthMetric, MetricRegistry
+from dive.recommend import profile_from_participant, recommend_for_profile
+from dive.trajectory_model import fit_trajectory_model
 
 st.set_page_config(
-    page_title="PORAF B/T Analysis",
+    page_title="Dive",
     page_icon=None,
     layout="wide",
     initial_sidebar_state="expanded",
@@ -80,7 +85,7 @@ def data_or_stop():
 def masthead(title: str, subtitle: str) -> None:
     st.markdown(
         f'<div class="masthead">'
-        f'<div class="eyebrow">PORAF &middot; IL-6 trans-signalling</div>'
+        f'<div class="eyebrow">Dive &middot; PORAF &middot; IL-6 trans-signalling</div>'
         f"<h1>{title}</h1>"
         f'<div class="sub">{subtitle}</div>'
         f"</div>",
@@ -146,15 +151,15 @@ def screen_data() -> None:
             st.success(f"Loaded {uploaded.name}")
 
         columns = st.columns(2)
-        if columns[0].button("Generate synthetic data", use_container_width=True):
-            from poraf_bt.generate_synthetic_data import generate_workbook
+        if columns[0].button("Generate synthetic data", width="stretch"):
+            from dive.generate_synthetic_data import generate_workbook
 
             with st.spinner("Generating..."):
                 path, _ = generate_workbook()
             st.session_state["data_path"] = str(path)
             st.cache_resource.clear()
             st.success("Synthetic workbook generated.")
-        if columns[1].button("Reset to configured source", use_container_width=True):
+        if columns[1].button("Reset to configured source", width="stretch"):
             st.session_state.pop("data_path", None)
             st.cache_resource.clear()
             st.rerun()
@@ -247,8 +252,8 @@ def screen_data() -> None:
             layout["xaxis"]["showgrid"] = True
             layout["xaxis"]["gridcolor"] = theme.RULE
             figure.update_layout(**layout)
-            st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
-            st.dataframe(missing, use_container_width=True, hide_index=True)
+            st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+            st.dataframe(missing, width="stretch", hide_index=True)
 
     with tab_preview:
         show = [
@@ -258,7 +263,7 @@ def screen_data() -> None:
                 "fried_score", "fried_category", "BT_ratio",
             ) if c in data.wide.columns
         ]
-        st.dataframe(data.wide[show].head(200), use_container_width=True, hide_index=True)
+        st.dataframe(data.wide[show].head(200), width="stretch", hide_index=True)
 
 
 # --------------------------------------------------------------------------
@@ -318,18 +323,18 @@ def screen_group_comparison() -> None:
         )
     )
     figure.update_xaxes(tickangle=0)
-    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
 
     st.markdown(theme.section("Tests"), unsafe_allow_html=True)
-    st.dataframe(result.summary_table(), use_container_width=True, hide_index=True)
+    st.dataframe(result.summary_table(), width="stretch", hide_index=True)
 
     st.markdown(theme.section("By subgroup"), unsafe_allow_html=True)
-    st.dataframe(result.descriptives, use_container_width=True, hide_index=True)
+    st.dataframe(result.descriptives, width="stretch", hide_index=True)
 
     with st.expander("Technical detail and assumptions"):
         st.markdown(f'<div class="note tech">{result.technical_note}</div>', unsafe_allow_html=True)
         if result.ancova is not None and not result.ancova.empty:
-            st.dataframe(result.ancova.round(4), use_container_width=True)
+            st.dataframe(result.ancova.round(4), width="stretch")
         for warning in result.warnings:
             st.markdown(f'<div class="caveat">{warning}</div>', unsafe_allow_html=True)
 
@@ -358,7 +363,7 @@ def screen_individual() -> None:
         horizon = row2[0].slider("Forecast horizon (months)", 3, 24, 12, 1)
         n_prior = row2[1].selectbox("Prior measurements available", [0, 2, 3], index=0,
                                     help="Supplying a participant's own history narrows the interval.")
-        submitted = st.form_submit_button("Predict", use_container_width=False)
+        submitted = st.form_submit_button("Predict", width="content")
 
     if not submitted:
         return
@@ -514,7 +519,7 @@ def screen_trajectory() -> None:
             height=460,
         )
     )
-    st.plotly_chart(figure, use_container_width=True, config={"displayModeBar": False})
+    st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
 
     final = projection.iloc[-1]
     st.markdown(
@@ -538,7 +543,7 @@ def screen_trajectory() -> None:
         st.dataframe(
             history[[c for c in ("visit", "elapsed_months", "max_grip_kg", "gait_speed_ms",
                                  "sppb_total") if c in history.columns]],
-            use_container_width=True, hide_index=True,
+            width="stretch", hide_index=True,
         )
 
 
@@ -634,6 +639,8 @@ def screen_recommendations() -> None:
                 unsafe_allow_html=True,
             )
 
+    _evidence_advisor_section(profile, result)
+
     if result.unassessed:
         with st.expander(f"Not assessed ({len(result.unassessed)})"):
             st.markdown(
@@ -643,6 +650,113 @@ def screen_recommendations() -> None:
             )
             for item in result.unassessed:
                 st.markdown(f'<div class="caveat">{item}</div>', unsafe_allow_html=True)
+
+
+def _evidence_advisor_section(profile: dict, curated_result) -> None:
+    """Literature-grounded, participant-specific advice via the Claude API."""
+    st.markdown(theme.section("Evidence advisor"), unsafe_allow_html=True)
+    st.markdown(
+        '<div class="note">The library above matches fixed thresholds and returns the same '
+        "wording for anyone who crosses them. The advisor retrieves published trials and "
+        "reviews for this participant's specific findings, then reasons about what they mean "
+        "for <i>this</i> combination of values. It can only cite studies it actually "
+        "retrieved, and every identifier is checked against that set before anything is "
+        "shown.</div>",
+        unsafe_allow_html=True,
+    )
+
+    available, why = Advisor.client_available()
+    if not available:
+        st.markdown(
+            f'<div class="abstain"><div class="t">Advisor unavailable</div>'
+            f'<ul><li>{why}.</li>'
+            "<li>Dive will not write literature-grounded advice without retrieval - "
+            "the curated library above still applies.</li></ul></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    notes: list[str] = []
+    try:
+        decline = _decline(active_path())
+        notes.append(decline.result_.verdict)
+    except Exception:
+        pass
+
+    if not st.button("Retrieve evidence and advise"):
+        return
+
+    brief = brief_from_profile(profile, curated_result, model_notes=notes)
+    with st.spinner("Retrieving studies and reviewing them for this participant..."):
+        outcome = Advisor().advise(brief)
+
+    if not outcome.available:
+        st.markdown(
+            f'<div class="abstain"><div class="t">No advice issued</div>'
+            f"<ul><li>{outcome.reason}</li></ul></div>",
+            unsafe_allow_html=True,
+        )
+        return
+
+    st.markdown(theme.verdict_block(outcome.headline()), unsafe_allow_html=True)
+
+    if outcome.n_citations_dropped:
+        st.markdown(
+            f'<div class="caveat"><b>{outcome.n_citations_dropped} citation'
+            f"{'s' if outcome.n_citations_dropped != 1 else ''} discarded</b> because they did "
+            "not match any retrieved study. This is the fabrication check doing its job; the "
+            "recommendations below rest only on verified sources.</div>",
+            unsafe_allow_html=True,
+        )
+
+    strength_grade = {"strong": "A", "moderate": "B", "limited": "C", "insufficient": "D"}
+    for item in outcome.recommendations:
+        grade = strength_grade.get(item.evidence_strength, "C")
+        sources = "".join(
+            f'<div class="cite">{s.short_citation()} &mdash; '
+            f'<a href="{s.url}" target="_blank">{s.identifier}</a>. {s.title}.</div>'
+            for s in item.studies
+        )
+        st.markdown(
+            f'<div class="rec">'
+            f'<div class="title"><span class="grade grade-{grade}">'
+            f'{item.evidence_strength.upper()}</span>{item.title}</div>'
+            f'<div class="body">{item.rationale}</div>'
+            f'<div class="body"><b>For this participant.</b> {item.specific_to_participant}</div>'
+            f'<div class="caution"><b>Applicability.</b> {item.applicability_caveat}</div>'
+            f"{sources}"
+            f"</div>",
+            unsafe_allow_html=True,
+        )
+
+    if outcome.evidence_gaps:
+        st.markdown(theme.section("Gaps the evidence does not cover"), unsafe_allow_html=True)
+        for gap in outcome.evidence_gaps:
+            st.markdown(f'<div class="caveat">{gap}</div>', unsafe_allow_html=True)
+
+    with st.expander(f"Studies retrieved ({outcome.n_studies_retrieved})"):
+        if outcome.literature:
+            st.dataframe(
+                pd.DataFrame([
+                    {
+                        "Identifier": s.identifier,
+                        "Title": s.title,
+                        "Journal": s.journal,
+                        "Year": s.year,
+                        "Type": ", ".join(s.pub_types[:2]),
+                        "Cited by": s.cited_by,
+                    }
+                    for s in outcome.literature.studies
+                ]),
+                width="stretch", hide_index=True,
+            )
+        st.markdown(
+            f'<div class="note tech">Model {outcome.model} &middot; '
+            f"source {outcome.literature.source_api if outcome.literature else 'n/a'} &middot; "
+            f"{outcome.usage.get('input_tokens', '?')} in / "
+            f"{outcome.usage.get('output_tokens', '?')} out tokens</div>",
+            unsafe_allow_html=True,
+        )
 
 
 # --------------------------------------------------------------------------
@@ -657,16 +771,110 @@ def screen_learning() -> None:
         "performs better.",
     )
 
-    from poraf_bt.learning import DataSource, ModelRegistry, ingest_file, retrain_and_evaluate
-    from poraf_bt.learning.ingest import SourceRegistry
-    from poraf_bt.learning.retrain import detect_drift
+    from dive.learning import DataSource, ModelRegistry, ingest_file, retrain_and_evaluate
+    from dive.learning.ingest import SourceRegistry
+    from dive.learning.retrain import detect_drift
 
     data = data_or_stop()
     registry = SourceRegistry()
 
-    tab_add, tab_batches, tab_retrain, tab_models = st.tabs(
-        ["Add data", "Ingested batches", "Retrain", "Model history"]
+    tab_metrics, tab_add, tab_batches, tab_search, tab_retrain, tab_models = st.tabs(
+        ["Health metrics", "Add data", "Ingested batches", "Metric value",
+         "Retrain", "Model history"]
     )
+
+    with tab_metrics:
+        # Named distinctly: `registry` above is the SourceRegistry used by the
+        # batches tab, and Streamlit runs every tab body on each rerun.
+        metric_registry = MetricRegistry()
+        st.markdown(
+            '<div class="note">Dive can learn from any health metric, not just the ones it '
+            "ships with. Register a measurement here and it becomes ingestable immediately, "
+            "with its plausible range enforced. Registering does not put it into a model - "
+            "the <b>Metric value</b> tab decides that, on held-out participants.</div>",
+            unsafe_allow_html=True,
+        )
+        st.dataframe(metric_registry.to_frame(), width="stretch", hide_index=True)
+
+        with st.form("register_metric"):
+            st.markdown("**Register a new metric**")
+            row = st.columns(3)
+            metric_name = row[0].text_input("Name", placeholder="serum_vitamin_d")
+            metric_label = row[1].text_input("Label", placeholder="Serum 25-OH vitamin D")
+            metric_unit = row[2].text_input("Unit", placeholder="nmol/L")
+            row = st.columns(4)
+            metric_domain = row[0].selectbox(
+                "Domain",
+                ["physical_function", "body_composition", "inflammation",
+                 "cognition", "activity", "clinical", "other"],
+            )
+            metric_min = row[1].number_input("Plausible minimum", value=0.0, step=1.0)
+            metric_max = row[2].number_input("Plausible maximum", value=100.0, step=1.0)
+            metric_dir = row[3].selectbox("Higher is", ["better", "worse", "neither"])
+            metric_aliases = st.text_input(
+                "Other spellings (comma separated)", placeholder="vit_d, vitamin_d_25oh",
+                help="Column names in incoming files that mean this metric.",
+            )
+            if st.form_submit_button("Register"):
+                try:
+                    metric = HealthMetric(
+                        name=metric_name,
+                        label=metric_label,
+                        unit=metric_unit,
+                        domain=metric_domain,
+                        minimum=metric_min,
+                        maximum=metric_max,
+                        higher_is_better={"better": True, "worse": False}.get(metric_dir),
+                        aliases=tuple(
+                            a.strip() for a in metric_aliases.split(",") if a.strip()
+                        ),
+                    )
+                    metric_registry.register(metric)
+                    st.success(
+                        f"Registered '{metric.name}'. Values outside "
+                        f"{metric.range_text()} will be quarantined on ingestion."
+                    )
+                    st.rerun()
+                except ValueError as exc:
+                    st.error(str(exc))
+
+    with tab_search:
+        st.markdown(
+            '<div class="note">Tests whether any available metric improves prediction on '
+            "participants the model has not seen. The catch this guards against: trying many "
+            "metrics and keeping the best will find an apparent improvement even when every "
+            "one of them is noise. So the outcome labels are shuffled and the <i>whole search</i> "
+            "is re-run, which answers the question that matters - how large an improvement "
+            "would this search have found if nothing carried signal?</div>",
+            unsafe_allow_html=True,
+        )
+        permutations = st.slider(
+            "Permutations of the search", 40, 400, 120, 20,
+            help="More permutations give a more precise p-value and take longer.",
+        )
+        if st.button("Test metric value"):
+            from dive.learning.feature_search import search_features
+
+            with st.spinner("Re-running the search on shuffled outcomes..."):
+                found = search_features(
+                    data.substudy, n_permutations=permutations,
+                )
+            st.markdown(
+                theme.verdict_block(
+                    found.verdict, tone="neutral" if found.improved else "null"
+                ),
+                unsafe_allow_html=True,
+            )
+            if not found.to_frame().empty:
+                st.dataframe(found.to_frame(), width="stretch", hide_index=True)
+            st.markdown(
+                f'<div class="note tech">Baseline predictors: '
+                f"{', '.join(found.base_features)}. Adopted: "
+                f"{', '.join(found.adopted_features)}.</div>",
+                unsafe_allow_html=True,
+            )
+            for warning in found.warnings:
+                st.markdown(f'<div class="caveat">{warning}</div>', unsafe_allow_html=True)
 
     with tab_add:
         st.markdown(
@@ -703,7 +911,7 @@ def screen_learning() -> None:
                     result.quarantined[["participant_id", "quarantine_reason"]]
                     if "participant_id" in result.quarantined.columns
                     else result.quarantined,
-                    use_container_width=True, hide_index=True,
+                    width="stretch", hide_index=True,
                 )
 
     with tab_batches:
@@ -711,7 +919,7 @@ def screen_learning() -> None:
         if batches.empty:
             st.info("No external data has been ingested yet.")
         else:
-            st.dataframe(batches, use_container_width=True, hide_index=True)
+            st.dataframe(batches, width="stretch", hide_index=True)
             combined = registry.load_all()
             if not combined.empty:
                 st.markdown(theme.section("Distribution shift"), unsafe_allow_html=True)
@@ -735,7 +943,7 @@ def screen_learning() -> None:
                         ),
                         unsafe_allow_html=True,
                     )
-                    st.dataframe(drift.round(4), use_container_width=True, hide_index=True)
+                    st.dataframe(drift.round(4), width="stretch", hide_index=True)
 
     with tab_retrain:
         st.markdown(
@@ -755,14 +963,14 @@ def screen_learning() -> None:
                 unsafe_allow_html=True,
             )
             if not outcome.comparison.empty:
-                st.dataframe(outcome.comparison.round(4), use_container_width=True, hide_index=True)
+                st.dataframe(outcome.comparison.round(4), width="stretch", hide_index=True)
 
     with tab_models:
         history = ModelRegistry().history()
         if history.empty:
             st.info("No models have been registered yet.")
         else:
-            st.dataframe(history, use_container_width=True, hide_index=True)
+            st.dataframe(history, width="stretch", hide_index=True)
 
 
 # --------------------------------------------------------------------------
@@ -782,10 +990,10 @@ SCREENS = {
 def main() -> None:
     with st.sidebar:
         st.markdown(
-            '<div style="font-family:Source Serif 4,Georgia,serif;font-size:1.22rem;'
-            'font-weight:600;letter-spacing:-.01em;margin-bottom:.15rem;">PORAF</div>'
+            '<div style="font-family:Source Serif 4,Georgia,serif;font-size:1.5rem;'
+            'font-weight:600;letter-spacing:-.015em;margin-bottom:.1rem;">Dive</div>'
             '<div style="font-size:.70rem;letter-spacing:.13em;text-transform:uppercase;'
-            'color:#86837A;margin-bottom:1.6rem;">B/T ratio analysis</div>',
+            'color:#86837A;margin-bottom:1.6rem;">PORAF &middot; B/T ratio</div>',
             unsafe_allow_html=True,
         )
         choice = st.radio("Screen", list(SCREENS), label_visibility="collapsed")

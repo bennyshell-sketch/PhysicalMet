@@ -3,9 +3,9 @@ from pathlib import Path
 
 import pytest
 
-from poraf_bt.config import SETTINGS
-from poraf_bt.data_pipeline import build_dataset
-from poraf_bt.generate_synthetic_data import GenerationParams, generate_workbook
+from dive.config import SETTINGS
+from dive.data_pipeline import build_dataset
+from dive.generate_synthetic_data import GenerationParams, generate_workbook
 
 
 @pytest.fixture(scope="session")

@@ -4,15 +4,15 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from poraf_bt.config import SETTINGS
-from poraf_bt.data_pipeline import (
+from dive.config import SETTINGS
+from dive.data_pipeline import (
     build_dataset,
     clean_tug,
     harmonise_binary,
     max_grip_from_trials,
     resolve_participant_id,
 )
-from poraf_bt.data_pipeline import QualityReport
+from dive.data_pipeline import QualityReport
 
 
 def test_tug_sentinel_is_split_out_not_averaged_in():

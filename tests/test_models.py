@@ -6,11 +6,11 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from poraf_bt.config import SETTINGS
-from poraf_bt.decline_model import fit_decline_model, prior_correction_offset
-from poraf_bt.group_comparison import assert_null_on_synthetic, run_group_comparison
-from poraf_bt.trajectory_model import fit_trajectory_model
-from poraf_bt.validation import assert_no_participant_leakage, participant_aware_folds
+from dive.config import SETTINGS
+from dive.decline_model import fit_decline_model, prior_correction_offset
+from dive.group_comparison import assert_null_on_synthetic, run_group_comparison
+from dive.trajectory_model import fit_trajectory_model
+from dive.validation import assert_no_participant_leakage, participant_aware_folds
 
 
 @pytest.fixture(scope="module")
@@ -62,7 +62,7 @@ def test_case_control_caveat_is_always_present(decline):
 
 def test_model_refuses_profiles_outside_its_training_range(dataset):
     """Even a model that passes validation must refuse impossible covariates."""
-    from poraf_bt.decline_model import DeclineModel
+    from dive.decline_model import DeclineModel
 
     settings = SETTINGS
     model = DeclineModel(settings=settings)

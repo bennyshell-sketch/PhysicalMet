@@ -12,9 +12,8 @@ data_source: synthetic
 strict_evidence_mode: true
 
 cohort:
-  # The build spec quotes 65y; the confirmed PORAF protocol uses 60y
-  # (Group 0 = older adults >=60y, n=281). Defaulting to the protocol.
-  older_age_threshold: 60.0
+  # An older participant is aged 65 or above.
+  older_age_threshold: 65.0
   grip_decline_threshold_kg: 2.0
   tug_sentinel_value: 40.0
 

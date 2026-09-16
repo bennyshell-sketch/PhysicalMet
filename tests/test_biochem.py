@@ -3,7 +3,7 @@
 import numpy as np
 import pytest
 
-from poraf_bt.biochem import (
+from dive.biochem import (
     bt_ratio,
     free_mediator_equivalent,
     ng_per_ml_to_nM,
@@ -11,7 +11,7 @@ from poraf_bt.biochem import (
     solve_equilibrium,
     to_molar_nM,
 )
-from poraf_bt.config import SETTINGS
+from dive.config import SETTINGS
 
 PHYSIOLOGICAL = [(2.0, 40.0, 350.0), (0.5, 20.0, 500.0), (30.0, 80.0, 180.0), (8.2, 55.0, 280.0)]
 
