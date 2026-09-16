@@ -14,6 +14,12 @@ deployment_label: "Clinical prediction platform"
 # Withhold predictions the models cannot support, rather than guessing.
 strict_evidence_mode: true
 
+# Let the owner console write to project source files.
+# OFF by default. Editing source through a web interface is remote code
+# execution by design - a path allowlist narrows the blast radius, it does not
+# remove it. Leave this false unless Dive is on localhost or a trusted network.
+allow_source_editing: false
+
 privacy:
   # topic_only    - only a generic clinical question leaves; matching is local
   # none          - nothing participant-derived leaves this process

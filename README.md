@@ -93,6 +93,7 @@ workbook has a quirk that isn't handled, it shows up there as a surprise.
 | `dive/calibration.py` | Scanner QC, precision, least significant change, comparability |
 | `dive/fairness.py` | Subgroup auditing; protected attributes screened out of models |
 | `dive/evidence_grading.py` | OCEBM, GRADE, Cochrane RoB 2, AMSTAR-2 |
+| `dive/owner.py` | Owner console: timeline, model lineage, gated source editing |
 | `dive/privacy.py` | The egress boundary: de-identification, scanning, audit |
 | `dive/security.py` | Audit chain, encryption at rest, auth, upload validation |
 | `dive/providers.py` | Claude / Gemini / local models behind one guarded interface |
@@ -424,7 +425,7 @@ cohort may legitimately differ, and the point is that you are told.
 
 ```bash
 python -m dive.validation     # 17 checks
-python -m pytest tests/ -q        # 181 tests
+python -m pytest tests/ -q        # 208 tests
 ```
 
 Four families of check:

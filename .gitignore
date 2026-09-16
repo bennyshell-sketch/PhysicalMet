@@ -33,4 +33,5 @@ data/metrics.json
 data/autolearn_state.json
 data/audit.jsonl
 data/calibration.json
+data/source_backups/
 *.enc

@@ -55,6 +55,9 @@ test whether a metric earns a place, retrain.
 **Privacy and security** — what leaves the process, what is withheld, the audit
 log, and the fairness audit.
 
+**Owner console** — locked behind your own key. The full history, what the model
+has learned, and source editing. See below.
+
 ---
 
 ## The first thing that will surprise you
@@ -170,6 +173,61 @@ participant and see exactly what would be sent and what is withheld.
 **This has not been tested against the live APIs.** The environment it was built
 in blocks PubMed and had no keys. The citation-verification logic is tested
 offline. Run it once with a key before relying on it.
+
+---
+
+## The owner console
+
+This is the one screen only you get into. It needs a key, which you generate
+once:
+
+```bash
+python -c "from dive.owner import OwnerGate; g=OwnerGate(); k=g.generate_key(); print('KEY :', k); print('HASH:', g.hash_key(k))"
+```
+
+Keep the **KEY** somewhere safe — it is shown once and Dive never stores it. Put
+the **HASH** in your environment:
+
+```bash
+export DIVE_OWNER_KEY_HASH='scrypt$32768$...'
+./run.sh
+```
+
+Four tabs:
+
+**What happened** — one chronological record across everything: data ingested,
+outbound calls made or blocked, learning cycles, model promotions, source edits.
+This is where *"why does it do that now?"* gets answered.
+
+**What it learned** — every model version and its metrics, performance over
+time, which metrics were tested and which earned a place, and every autonomous
+cycle. A flat performance line is the expected result when new data carries no
+new signal.
+
+**Source** — read and edit the code, with a diff and an automatic backup.
+
+**State** — audit chain integrity, egress mode, whether protected features are
+allowed.
+
+### Source editing is off by default, deliberately
+
+Editing source through a web interface is remote code execution by design.
+Anyone with your key can write arbitrary Python into the application. A path
+allowlist narrows the blast radius; it does not remove it.
+
+To turn it on, set `allow_source_editing: true` in `settings.yaml`. Even then:
+
+- writes are confined to `dive/`, `app/`, `tests/`, `docs/` — never `.git`,
+  `.venv`, `data/`, or any settings file holding secrets
+- Python is parsed before it is written; a file that would not import is
+  refused rather than saved and discovered at the next restart
+- a timestamped backup is taken before every save, and any version restores
+- every read, write and restore is audited with before-and-after hashes
+- nothing is executed — changes take effect at the next restart, so a bad edit
+  is a failed start rather than a live compromise
+
+**If Dive is reachable from anything other than localhost or a network you
+trust, leave this off** and edit the repository the normal way.
 
 ---
 

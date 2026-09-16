@@ -222,6 +222,11 @@ class Settings:
     #: predictions outside the model's competence are withheld, not guessed.
     strict_evidence_mode: bool = True
 
+    #: Allow the owner console to write to project source files. OFF by
+    #: default: editing source through a web interface is remote code
+    #: execution by design, and no path filter changes that. See dive/owner.py.
+    allow_source_editing: bool = False
+
     #: Allow self-reported ethnicity or race to be used as a model FEATURE.
     #: Off by default and logged when enabled - see dive/fairness.py for why
     #: this is not a neutral configuration choice.
@@ -250,6 +255,7 @@ _SCALAR_ENV_MAP: dict[str, tuple[str, ...]] = {
     "DEPLOYMENT_LABEL": ("deployment_label",),
     "STRICT_EVIDENCE_MODE": ("strict_evidence_mode",),
     "ALLOW_PROTECTED_FEATURES": ("allow_protected_features",),
+    "ALLOW_SOURCE_EDITING": ("allow_source_editing",),
     "RANDOM_SEED": ("model", "random_seed"),
     "OLDER_AGE_THRESHOLD": ("cohort", "older_age_threshold"),
     "CONFORMAL_ALPHA": ("model", "conformal_alpha"),

@@ -83,6 +83,25 @@ Roles: `viewer` (aggregates), `analyst` (individual records, models, ingestion),
 Run `python -m pytest tests/test_security.py tests/test_privacy.py -q` to
 exercise all of it.
 
+## The owner console
+
+One key, held by one person, unlocking the full history, the model lineage and
+source editing. The key is generated once, stored by the owner, and never held
+by Dive — only a scrypt hash, in `DIVE_OWNER_KEY_HASH`. Failed attempts are
+rate-limited and audited.
+
+**Source editing is remote code execution by design**, and ships disabled. This
+is not a hedge: anyone who obtains the owner key can write arbitrary Python into
+the application, and no path filter changes that. Enabling it is a deliberate
+act (`allow_source_editing: true`), and even then writes are confined to an
+allowlist, Python is parsed before it is written, a backup is taken before every
+save, every operation is audited with before-and-after hashes, and nothing is
+executed — changes take effect at the next restart, so a bad edit is a failed
+start rather than a live compromise.
+
+If Dive is reachable from anything but localhost or a trusted network, leave it
+off.
+
 ## Not covered here — the deployer's responsibility
 
 These cannot be solved in application code and must be in place before real

@@ -28,6 +28,7 @@ from dive.data_pipeline import build_dataset, load_dataset
 from dive.decline_model import fit_decline_model
 from dive.group_comparison import run_group_comparison
 from dive.advisor import Advisor, brief_from_profile
+from dive.owner import OwnerConsole, OwnerGate, SourceEditor
 from dive.privacy import ALLOWED_CLINICAL_KEYS, EgressGuard, PrivacyPolicy, deidentify_profile
 from dive.calibration import CalibrationStore, PhantomReading, ScannerCalibration, precision_from_repeats
 from dive.fairness import PROTECTED_ATTRIBUTES, audit_subgroups, reference_population_note, screen_features
@@ -1383,6 +1384,237 @@ def screen_privacy() -> None:
 
 
 # --------------------------------------------------------------------------
+# Screen 8 - Owner console
+# --------------------------------------------------------------------------
+
+def screen_owner() -> None:
+    masthead(
+        "Owner console",
+        "What has happened, what has changed, what the model has learned, and the "
+        "source it all runs on.",
+    )
+
+    gate = OwnerGate()
+
+    if not gate.configured:
+        st.markdown(
+            theme.verdict_block(
+                "No owner key is configured on this deployment.", tone="caution"
+            ),
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            f'<div class="note tech">{gate.setup_instructions()}</div>',
+            unsafe_allow_html=True,
+        )
+        return
+
+    if not st.session_state.get("owner_unlocked"):
+        st.markdown(
+            '<div class="note">The console is locked. Failed attempts are rate-limited '
+            "and audited.</div>",
+            unsafe_allow_html=True,
+        )
+        with st.form("owner_unlock"):
+            key = st.text_input("Owner key", type="password")
+            if st.form_submit_button("Unlock"):
+                try:
+                    if gate.verify(key):
+                        st.session_state["owner_unlocked"] = True
+                        st.rerun()
+                    else:
+                        st.error("That key was not accepted.")
+                except ValidationError as exc:
+                    st.error(str(exc))
+        return
+
+    console = OwnerConsole()
+    st.markdown(theme.verdict_block(console.summary()), unsafe_allow_html=True)
+
+    if st.button("Lock console"):
+        st.session_state.pop("owner_unlocked", None)
+        st.rerun()
+
+    tab_time, tab_learn, tab_source, tab_state = st.tabs(
+        ["What happened", "What it learned", "Source", "State"]
+    )
+
+    # ---------------- timeline ----------------
+    with tab_time:
+        st.markdown(
+            '<div class="note">One record across every subsystem - data ingestion, '
+            "outbound calls, learning cycles, model promotions and source edits. This is "
+            "where \"why does it do that now?\" gets answered.</div>",
+            unsafe_allow_html=True,
+        )
+        timeline = console.timeline()
+        if timeline.empty:
+            st.info("Nothing recorded yet.")
+        else:
+            sources = sorted(timeline["Source"].unique())
+            chosen = st.multiselect("Show", sources, default=sources)
+            filtered = timeline[timeline["Source"].isin(chosen)]
+            st.dataframe(filtered, width="stretch", hide_index=True, height=520)
+
+    # ---------------- learning ----------------
+    with tab_learn:
+        st.markdown(theme.section("Model lineage"), unsafe_allow_html=True)
+        lineage = console.model_lineage()
+        if lineage.empty:
+            st.info("No models have been registered yet. Train one from Training and data.")
+        else:
+            st.dataframe(lineage, width="stretch", hide_index=True)
+
+            curve = console.learning_curve()
+            if len(curve) >= 2 and "auc_cv" in curve.columns:
+                st.markdown(theme.section("Performance over time"), unsafe_allow_html=True)
+                figure = go.Figure()
+                figure.add_hline(
+                    y=0.5, line=dict(color=theme.RULE_STRONG, width=1, dash="dash"),
+                    annotation_text="chance", annotation_position="bottom right",
+                    annotation_font=dict(size=10.5, color=theme.INK_MUTED),
+                )
+                figure.add_trace(go.Scatter(
+                    x=list(range(1, len(curve) + 1)), y=curve["auc_cv"],
+                    mode="lines+markers", name="Cross-validated AUC",
+                    line=dict(color=theme.ACCENT, width=2),
+                    marker=dict(size=9, color=theme.PAPER,
+                                line=dict(color=theme.ACCENT, width=2)),
+                    hovertemplate="Version %{x}<br>AUC %{y:.3f}<extra></extra>",
+                ))
+                if "auc_holdout" in curve.columns:
+                    figure.add_trace(go.Scatter(
+                        x=list(range(1, len(curve) + 1)), y=curve["auc_holdout"],
+                        mode="lines+markers", name="Held-out AUC",
+                        line=dict(color=theme.SUBGROUP_COLORS["Maintained Function"], width=2, dash="dot"),
+                        marker=dict(size=8),
+                        hovertemplate="Version %{x}<br>Held-out %{y:.3f}<extra></extra>",
+                    ))
+                figure.update_layout(**theme.plotly_layout(
+                    xaxis_title="Model version (oldest first)",
+                    yaxis_title="AUC", height=380,
+                ))
+                st.plotly_chart(figure, width="stretch", config={"displayModeBar": False})
+                st.markdown(
+                    '<div class="caveat">A flat line is the expected result when new data '
+                    "carries no new signal. Movement matters only when it clears the "
+                    "promotion gate, which is what the lineage table records.</div>",
+                    unsafe_allow_html=True,
+                )
+
+        st.markdown(theme.section("Metrics that earned a place"), unsafe_allow_html=True)
+        adopted = console.adopted_metrics()
+        if adopted.empty:
+            st.markdown(
+                '<div class="note">No metric has yet been adopted into a model. That is '
+                "the normal state - a metric is adopted only when it beats a permutation "
+                "null built from the whole search.</div>",
+                unsafe_allow_html=True,
+            )
+        else:
+            st.dataframe(adopted, width="stretch", hide_index=True)
+
+        st.markdown(theme.section("Learning cycles"), unsafe_allow_html=True)
+        cycles = console.cycle_history()
+        if cycles.empty:
+            st.info("No autonomous cycles have run.")
+        else:
+            st.dataframe(cycles, width="stretch", hide_index=True)
+
+    # ---------------- source ----------------
+    with tab_source:
+        editor = SourceEditor()
+        if not editor.enabled:
+            st.markdown(
+                f'<div class="abstain"><div class="t">Source editing is disabled</div>'
+                "<ul><li>Editing source through a web interface is remote code execution "
+                "by design. A path allowlist narrows the blast radius; it does not remove "
+                "it.</li>"
+                "<li>To enable it, set <code>allow_source_editing: true</code> in "
+                "<code>settings.yaml</code>.</li>"
+                "<li>Leave it off unless Dive is on localhost or a trusted network. "
+                "Editing the repository directly is the safer route.</li></ul></div>",
+                unsafe_allow_html=True,
+            )
+
+        files = editor.list_files()
+        if files.empty:
+            st.info("No editable files found.")
+        else:
+            # Default to a substantive file: opening on an empty __init__.py
+            # makes the editor look broken.
+            options = files["Path"].tolist()
+            default = next(
+                (i for i, path in enumerate(options) if path == "dive/config.py"),
+                int(files["Lines"].astype(int).idxmax()) if len(files) else 0,
+            )
+            chosen = st.selectbox("File", options, index=min(default, len(options) - 1))
+            try:
+                content = editor.read(chosen)
+            except ValidationError as exc:
+                st.error(str(exc))
+                content = ""
+
+            edited = st.text_area(
+                "Contents", value=content, height=460, label_visibility="collapsed"
+            )
+            note = st.text_input("What are you changing, and why?", placeholder="e.g. widen the plausible range for CTX")
+
+            columns = st.columns(2)
+            if columns[0].button("Save", width="stretch", disabled=not editor.enabled):
+                result = editor.write(chosen, edited, note=note)
+                if result.written:
+                    st.markdown(
+                        theme.verdict_block(
+                            f"{result.reason} +{result.lines_added} / "
+                            f"-{result.lines_removed} lines."
+                        ),
+                        unsafe_allow_html=True,
+                    )
+                    if result.diff:
+                        with st.expander("Diff"):
+                            st.code(result.diff, language="diff")
+                else:
+                    st.error(result.reason)
+
+            if columns[1].button("Check without saving", width="stretch"):
+                valid, problem = SourceEditor.validate(chosen, edited)
+                if valid:
+                    st.success("Parses cleanly.")
+                else:
+                    st.error(problem)
+
+        st.markdown(theme.section("Backups"), unsafe_allow_html=True)
+        backups = editor.backups()
+        if backups.empty:
+            st.info("No backups yet. One is taken automatically before every save.")
+        else:
+            st.dataframe(backups, width="stretch", hide_index=True)
+            restore_name = st.selectbox("Restore", backups["Backup"].tolist())
+            if st.button("Restore this version", disabled=not editor.enabled):
+                result = editor.restore(restore_name)
+                st.success(result.reason) if result.written else st.error(result.reason)
+
+    # ---------------- state ----------------
+    with tab_state:
+        state = console.integrity()
+        st.dataframe(
+            pd.DataFrame([
+                {"Check": "Audit chain intact", "Value": "yes" if state["audit_intact"] else "NO"},
+                {"Check": "Audited events", "Value": state["n_entries"]},
+                {"Check": "Owner key configured", "Value": "yes" if state["owner_key_configured"] else "no"},
+                {"Check": "Source editing", "Value": "ENABLED" if state["source_editing_enabled"] else "disabled"},
+                {"Check": "Egress mode", "Value": SETTINGS.privacy.egress_mode},
+                {"Check": "Data source", "Value": SETTINGS.data_source},
+                {"Check": "Protected features allowed", "Value": "YES" if SETTINGS.allow_protected_features else "no"},
+            ]),
+            width="stretch", hide_index=True,
+        )
+        for problem in state["problems"][:10]:
+            st.markdown(f'<div class="caveat">{problem}</div>', unsafe_allow_html=True)
+
+
+# --------------------------------------------------------------------------
 # Shell
 # --------------------------------------------------------------------------
 
@@ -1394,6 +1626,7 @@ SCREENS = {
     "Recommendations": screen_recommendations,
     "Training and data": screen_learning,
     "Privacy and security": screen_privacy,
+    "Owner console": screen_owner,
 }
 
 
