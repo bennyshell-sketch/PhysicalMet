@@ -17,12 +17,33 @@ data and nothing else.
 
 ## Quick start
 
+**Windows** — double-click **`START-DIVE-windows.bat`**.
+Step-by-step, including installing Python: [WINDOWS.md](WINDOWS.md)
+
+**macOS / Linux**
+
+```bash
+./start-dive-mac-linux.sh
+```
+
+First run sets up a local environment, installs dependencies, generates a
+synthetic cohort and opens the interface at http://localhost:8501. No API keys,
+no internet, nothing sent anywhere. After that it starts in seconds.
+
+```bash
+./start-dive-mac-linux.sh check    # 17 validation checks, then 208 tests
+```
+
+**New here? Read [QUICKSTART.md](QUICKSTART.md)** — what each screen does, how to
+load your own data, and what to try first.
+
+Running the pieces directly, if you prefer:
+
 ```bash
 pip install -r requirements.txt
-
-python -m dive.generate_synthetic_data   # create the synthetic workbook
-python -m dive.validation                # 17 correctness checks
-streamlit run app/app.py                     # open the interface
+python -m dive.generate_synthetic_data
+python -m dive.validation
+streamlit run app/app.py
 ```
 
 ---

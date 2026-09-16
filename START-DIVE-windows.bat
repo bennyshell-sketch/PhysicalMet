@@ -2,8 +2,8 @@
 REM Dive - Windows launcher.
 REM
 REM   Double-click this file to start Dive.
-REM   run.bat check   runs the validation harness and the test suite
-REM   run.bat data    regenerates the synthetic cohort
+REM   START-DIVE-windows.bat check   runs the validation harness and the test suite
+REM   START-DIVE-windows.bat data    regenerates the synthetic cohort
 REM
 REM The window stays open on any error so you can read what went wrong.
 
@@ -43,7 +43,7 @@ if "!LAUNCHER!"=="" (
   echo   That one checkbox is the most common reason this fails.
   echo.
   echo   Then close this window, open the folder again, and
-  echo   double-click run.bat.
+  echo   double-click START-DIVE-windows.bat.
   echo.
   pause
   exit /b 1

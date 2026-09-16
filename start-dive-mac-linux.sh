@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
 # Dive - one-command start.
 #
-#   ./run.sh            launch the app
-#   ./run.sh check      run the validation harness and tests
-#   ./run.sh data       regenerate the synthetic cohort
+#   ./start-dive-mac-linux.sh            launch the app
+#   ./start-dive-mac-linux.sh check      run the validation harness and tests
+#   ./start-dive-mac-linux.sh data       regenerate the synthetic cohort
 #
 # Creates a local virtual environment on first run and installs into it.
 # Nothing is installed system-wide, and nothing is sent anywhere.
@@ -60,7 +60,7 @@ case "${1:-app}" in
     "$PY" -m dive.generate_synthetic_data
     ;;
   *)
-    echo "Usage: ./run.sh [app|check|data]"
+    echo "Usage: ./start-dive-mac-linux.sh [app|check|data]"
     exit 1
     ;;
 esac

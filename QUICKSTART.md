@@ -7,13 +7,13 @@ You need Python 3.10 or newer. Everything else installs itself.
 ```bash
 git clone --branch claude/exciting-ride-s5j9tk https://github.com/bennyshell-sketch/PhysicalMet.git dive
 cd dive
-./run.sh
+./start-dive-mac-linux.sh
 ```
 
 The repository is private, so cloning will ask for your GitHub credentials.
 
-**On Windows, see [WINDOWS.md](WINDOWS.md)** — step by step, no terminal
-needed.
+**On Windows**, double-click **`START-DIVE-windows.bat`**. Step by step,
+including installing Python: [WINDOWS.md](WINDOWS.md)
 
 First run takes a few minutes: it builds a local environment, installs
 dependencies and generates a synthetic cohort. After that it starts in seconds.
@@ -25,7 +25,7 @@ synthetic data.
 To check it installed correctly:
 
 ```bash
-./run.sh check      # 17 validation checks, then 181 tests
+./start-dive-mac-linux.sh check      # 17 validation checks, then 181 tests
 ```
 
 ---
@@ -161,7 +161,7 @@ needs a key:
 export ANTHROPIC_API_KEY=sk-ant-...      # or
 export GEMINI_API_KEY=AIza...            # or
 export OPENAI_API_KEY=sk-...
-./run.sh
+./start-dive-mac-linux.sh
 ```
 
 By default the provider never sees your patients. It receives a literature
@@ -193,7 +193,7 @@ the **HASH** in your environment:
 
 ```bash
 export DIVE_OWNER_KEY_HASH='scrypt$32768$...'
-./run.sh
+./start-dive-mac-linux.sh
 ```
 
 Four tabs:
@@ -237,13 +237,13 @@ trust, leave this off** and edit the repository the normal way.
 ## If something goes wrong
 
 **Port already in use** — something else is on 8501:
-`./run.sh` then `./.venv/bin/python -m streamlit run app/app.py --server.port 8502`
+`./start-dive-mac-linux.sh` then `./.venv/bin/python -m streamlit run app/app.py --server.port 8502`
 
-**Start completely fresh** — delete `.venv` and run `./run.sh` again.
+**Start completely fresh** — delete `.venv` and run `./start-dive-mac-linux.sh` again.
 
 **Blank or stale screen** — refresh the browser; Streamlit caches aggressively.
 
-**Something looks wrong in the numbers** — run `./run.sh check`. If the 17
+**Something looks wrong in the numbers** — run `./start-dive-mac-linux.sh check`. If the 17
 validation checks pass, the pipeline is behaving; if they fail, the output names
 which check and why.
 

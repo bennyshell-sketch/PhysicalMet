@@ -61,9 +61,9 @@ repository is private — it is yours, and nobody else can see it.
 
 ## Step 3 — Run it
 
-Open the folder. You will see files including `run.bat`.
+Open the folder. You will see files including `START-DIVE-windows.bat`.
 
-**Double-click `run.bat`.**
+**Double-click `START-DIVE-windows.bat`.**
 
 A black window opens. On the first run it says *"First run — setting up"* and
 takes a few minutes while it downloads what it needs. **Leave the window open.**
@@ -79,7 +79,7 @@ That is it. Next time it starts in a few seconds.
 
 - **Leave the black window open.** Closing it stops Dive.
 - To stop it: click the black window and press **Ctrl+C**, or just close it.
-- To start it again: double-click `run.bat`.
+- To start it again: double-click `START-DIVE-windows.bat`.
 - If the browser does not open on its own, type `localhost:8501` into your
   address bar.
 
@@ -93,7 +93,7 @@ This appears for any file downloaded from the internet that Microsoft has not
 seen before. Click **More info**, then **Run anyway**.
 
 Your antivirus may also ask. It is a text file of commands — you can open
-`run.bat` in Notepad and read exactly what it does.
+`START-DIVE-windows.bat` in Notepad and read exactly what it does.
 
 ---
 
@@ -116,7 +116,7 @@ Usually no internet, or a work firewall blocking downloads. On a work laptop,
 try a home network.
 
 **The window flashes and disappears**
-You have an old copy of `run.bat`. Download the ZIP again — the current version
+You have an old copy of `START-DIVE-windows.bat`. Download the ZIP again — the current version
 always stays open.
 
 **The download link gives "404 — page not found"**
@@ -135,7 +135,7 @@ Open the folder, hold **Shift**, right-click an empty area, choose
 **Open PowerShell window here** or **Open in Terminal**, then type:
 
 ```
-.\run.bat check
+.\START-DIVE-windows.bat check
 ```
 
 It runs 17 validation checks and 208 tests. All passing means the installation
