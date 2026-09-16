@@ -29,6 +29,8 @@ from dive.decline_model import fit_decline_model
 from dive.group_comparison import run_group_comparison
 from dive.advisor import Advisor, brief_from_profile
 from dive.privacy import ALLOWED_CLINICAL_KEYS, EgressGuard, PrivacyPolicy, deidentify_profile
+from dive.calibration import CalibrationStore, PhantomReading, ScannerCalibration, precision_from_repeats
+from dive.fairness import PROTECTED_ATTRIBUTES, audit_subgroups, reference_population_note, screen_features
 from dive.providers import available_providers
 from dive.security import AuditLog, DataVault, UploadValidator, ValidationError
 from dive.metrics import HealthMetric, MetricRegistry
@@ -790,10 +792,80 @@ def screen_learning() -> None:
     data = data_or_stop()
     registry = SourceRegistry()
 
-    tab_metrics, tab_add, tab_batches, tab_search, tab_retrain, tab_auto, tab_models = st.tabs(
-        ["Health metrics", "Add data", "Ingested batches", "Metric value",
-         "Retrain", "Autonomous", "Model history"]
+    (tab_metrics, tab_add, tab_batches, tab_calib, tab_search,
+     tab_retrain, tab_auto, tab_models) = st.tabs(
+        ["Health metrics", "Add data", "Ingested batches", "Calibration",
+         "Metric value", "Retrain", "Autonomous", "Model history"]
     )
+
+    with tab_calib:
+        store = CalibrationStore()
+        st.markdown(
+            '<div class="note">Imaging values are only comparable if the scanner that '
+            "produced them is. Register each device, record phantom QC scans, and Dive "
+            "flags drift and refuses to pool measurements that are not comparable.</div>",
+            unsafe_allow_html=True,
+        )
+        status = store.status_frame()
+        if status.empty:
+            st.info("No imaging devices registered yet.")
+        else:
+            st.dataframe(status, width="stretch", hide_index=True)
+            for report in store.drift_reports():
+                st.markdown(
+                    theme.verdict_block(
+                        report.verdict, tone="stop" if report.drifted else "null"
+                    ),
+                    unsafe_allow_html=True,
+                )
+
+        with st.form("register_device"):
+            st.markdown("**Register a device**")
+            row = st.columns(4)
+            device_id = row[0].text_input("Device ID", placeholder="XCT-3000-A")
+            modality = row[1].selectbox("Modality", ["pQCT", "DXA", "CT", "MRI"])
+            device_site = row[2].text_input("Site", placeholder="Main clinic")
+            voxel = row[3].number_input("Voxel size (mm)", 0.0, 5.0, 0.4, 0.05)
+            if st.form_submit_button("Register device") and device_id:
+                store.register_device(ScannerCalibration(
+                    device_id=device_id, modality=modality, site=device_site,
+                    voxel_size_mm=voxel or None,
+                ))
+                st.success(f"Registered {device_id}.")
+                st.rerun()
+
+        devices = list(store.devices())
+        if devices:
+            with st.form("phantom"):
+                st.markdown("**Record a phantom QC scan**")
+                row = st.columns(3)
+                which = row[0].selectbox("Device", devices)
+                measured = row[1].number_input("Measured value", 0.0, 10000.0, 100.0, 0.1)
+                nominal = row[2].number_input("Nominal value", 0.1, 10000.0, 100.0, 0.1)
+                if st.form_submit_button("Record"):
+                    store.record_phantom(PhantomReading(which, measured, nominal))
+                    st.success("Recorded.")
+                    st.rerun()
+
+        st.markdown(theme.section("Least significant change"), unsafe_allow_html=True)
+        st.markdown(
+            '<div class="note">From repeat scans, the smallest difference that is a real '
+            "change rather than machine noise (2.77 x RMS-SD, the ISCD formula). A "
+            "follow-up difference smaller than this has not changed.</div>",
+            unsafe_allow_html=True,
+        )
+        row = st.columns(3)
+        precision_sd = row[0].number_input("Precision SD", 0.0, 1000.0, 3.7, 0.1)
+        mean_value = row[1].number_input("Mean value", 0.1, 10000.0, 220.0, 1.0)
+        from dive.calibration import least_significant_change as _lsc
+
+        row[2].markdown(
+            theme.stat_row([
+                ("CV", f"{precision_sd / mean_value * 100:.2f}", "%"),
+                ("LSC", f"{_lsc(precision_sd):.2f}", ""),
+            ]),
+            unsafe_allow_html=True,
+        )
 
     with tab_auto:
         from dive.learning import AutoLearner
@@ -1038,9 +1110,94 @@ def screen_privacy() -> None:
     policy = SETTINGS.privacy
     guard = EgressGuard(policy, audit_path=SETTINGS.paths.data_dir / "audit.jsonl")
 
-    tab_egress, tab_providers, tab_audit, tab_posture = st.tabs(
-        ["What leaves", "Model providers", "Audit log", "Security posture"]
+    tab_egress, tab_providers, tab_fair, tab_audit, tab_posture = st.tabs(
+        ["What leaves", "Model providers", "Fairness", "Audit log", "Security posture"]
     )
+
+    with tab_fair:
+        st.markdown(
+            theme.verdict_block(
+                "A model can be accurate overall and much worse for one group. The "
+                "aggregate number hides that, so Dive measures performance <b>within</b> "
+                "each group."
+            ),
+            unsafe_allow_html=True,
+        )
+        st.markdown(
+            '<div class="note">Race and ethnicity are self-reported social categories, '
+            "not biological variables. Dive refuses them as model features by default "
+            "and uses them for this audit instead. Clinical algorithms that treated them "
+            "as biology - the eGFR race coefficient, spirometry race correction, the VBAC "
+            "calculator - all had to be withdrawn or rebuilt. "
+            "See <code>docs/OMICS.md</code>.</div>",
+            unsafe_allow_html=True,
+        )
+
+        data = data_or_stop()
+        attributes = [
+            c for c in data.wide.columns
+            if c in PROTECTED_ATTRIBUTES or c in {"sex_label", "age_group", "subgroup"}
+        ]
+        if not attributes:
+            st.info("No grouping variable is available in this dataset to audit against.")
+        else:
+            attribute = st.selectbox("Audit across", attributes)
+            if st.button("Run fairness audit"):
+                with st.spinner("Scoring each subgroup..."):
+                    model = _decline(active_path())
+                    frame = data.substudy.copy()
+                    if "log_BT_ratio" not in frame.columns:
+                        frame["log_BT_ratio"] = np.log(frame["BT_ratio"].where(frame["BT_ratio"] > 0))
+                    features = model.guard_.feature_names_
+                    usable = frame.dropna(subset=list(features) + ["declined"])
+                    if attribute not in usable.columns:
+                        usable = usable.merge(
+                            data.wide[["participant_id", attribute]],
+                            on="participant_id", how="left",
+                        )
+                    usable = usable.dropna(subset=[attribute])
+                    if usable.empty:
+                        st.warning("No participants have both a prediction and this attribute.")
+                    else:
+                        usable["predicted_risk"] = model.pipeline_.predict_proba(
+                            usable[list(features)].to_numpy(float)
+                        )[:, 1]
+                        audit = audit_subgroups(usable, attribute)
+                        st.markdown(
+                            theme.verdict_block(
+                                audit.verdict,
+                                tone="stop" if audit.concerning else "null",
+                            ),
+                            unsafe_allow_html=True,
+                        )
+                        st.dataframe(audit.to_frame(), width="stretch", hide_index=True)
+                        for warning in audit.warnings:
+                            st.markdown(
+                                f'<div class="caveat">{warning}</div>', unsafe_allow_html=True
+                            )
+
+        st.markdown(theme.section("Which variables may be model features"), unsafe_allow_html=True)
+        from dive.metrics import MetricRegistry as _MR
+
+        allowed, refused = screen_features(_MR().candidate_features())
+        st.markdown(
+            f'<div class="note">{len(allowed)} eligible; {len(refused)} refused.</div>',
+            unsafe_allow_html=True,
+        )
+        for name, why in refused:
+            st.markdown(
+                f'<div class="caveat"><b>{name}</b> &mdash; {why}</div>',
+                unsafe_allow_html=True,
+            )
+
+        st.markdown(theme.section("Reference populations"), unsafe_allow_html=True)
+        measure = st.selectbox(
+            "Derived score", ["bmd_t_score", "egfr_ml_min", "prs_ebmd", "dnam_age_horvath"]
+        )
+        st.markdown(
+            f'<div class="caveat">{reference_population_note(measure)}</div>',
+            unsafe_allow_html=True,
+        )
 
     # ---------------- what leaves ----------------
     with tab_egress:

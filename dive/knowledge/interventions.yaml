@@ -25,6 +25,7 @@ meta:
 domains:
   physical_function: Physical function and strength
   body_composition: Body composition
+  bone: Bone density, structure and strength
   trans_signalling: IL-6 trans-signalling and the B/T ratio
 
 interventions:
@@ -210,6 +211,131 @@ interventions:
     caution: >
       Unintentional weight loss is a frailty criterion and must be
       investigated clinically, not treated as a target.
+
+  # ---------------------------------------------------------------- bone
+  - id: impact_resistance_bone
+    domain: bone
+    title: High-intensity resistance and impact training
+    grade: B
+    triggers:
+      - variable: bmd_t_score
+        operator: "<="
+        value: -1.0
+        rationale: T-score at or below -1.0 indicates low bone mass
+      - variable: pqct_trabecular_vbmd
+        operator: "<"
+        value: 140
+        rationale: Low trabecular volumetric density at the distal site
+      - variable: pqct_ssi_mm3
+        operator: "<"
+        value: 250
+        rationale: Reduced density-weighted section modulus indicates lower bone strength
+    detail: >
+      Supervised high-intensity resistance training combined with weight-bearing
+      impact loading, twice weekly, under supervision appropriate to fracture
+      risk.
+    effect: >
+      Improves lumbar spine and femoral neck bone mineral density and functional
+      performance in postmenopausal women with low bone mass, where lower-intensity
+      programmes generally do not. Effects on density are modest; effects on falls
+      risk and muscle function are larger and may matter more for fracture.
+    citation: >
+      Watson SL, et al. High-Intensity Resistance and Impact Training Improves Bone
+      Mineral Density and Physical Function in Postmenopausal Women With Osteopenia
+      and Osteoporosis: The LIFTMOR Randomized Controlled Trial. J Bone Miner Res
+      2018;33(2):211-220.
+    caution: >
+      Intensity is the active ingredient and also the risk. Requires supervision,
+      screening for vertebral fracture, and is not appropriate unsupervised in
+      people with established severe osteoporosis.
+
+  - id: bone_pharmacotherapy_referral
+    domain: bone
+    title: Refer for fracture-risk assessment and consider pharmacotherapy
+    grade: A
+    triggers:
+      - variable: bmd_t_score
+        operator: "<="
+        value: -2.5
+        rationale: WHO densitometric threshold for osteoporosis
+      - variable: vertebral_ct_density_hu
+        operator: "<"
+        value: 100
+        rationale: Opportunistic CT attenuation below 100 HU suggests osteoporosis
+    detail: >
+      This is a clinical referral, not a lifestyle recommendation. Formal
+      fracture-risk assessment determines whether pharmacological treatment is
+      indicated.
+    effect: >
+      Anti-resorptive and anabolic therapies reduce vertebral and hip fracture
+      risk substantially in people who meet treatment thresholds. No exercise or
+      nutrition intervention matches that effect size at this level of risk.
+    citation: >
+      Compston JE, et al. UK clinical guideline for the prevention and treatment of
+      osteoporosis. Arch Osteoporos 2017;12(1):43.
+    caution: >
+      Dive does not recommend, select or dose any medicine. This entry exists to
+      flag that a densitometric threshold has been crossed and that the decision
+      belongs with a clinician.
+
+  - id: calcium_vitamin_d_bone
+    domain: bone
+    title: Ensure adequate calcium and vitamin D (only where intake or status is low)
+    grade: C
+    triggers:
+      - variable: bmd_t_score
+        operator: "<="
+        value: -2.5
+        rationale: Osteoporosis, where adequacy is a precondition for other treatment
+      - variable: serum_vitamin_d
+        operator: "<"
+        value: 50
+        rationale: Serum 25-OH vitamin D below 50 nmol/L
+    detail: >
+      Correct documented deficiency and ensure adequate dietary calcium. This is
+      a floor, not a treatment.
+    effect: >
+      Fracture-prevention benefit is confined to populations with low baseline
+      intake or status, most clearly in institutionalised older adults. In
+      community-dwelling, replete adults the evidence does not support routine
+      supplementation for fracture prevention.
+    citation: >
+      Bolland MJ, et al. Effects of vitamin D supplementation on musculoskeletal
+      health: a systematic review, meta-analysis, and trial sequential analysis.
+      Lancet Diabetes Endocrinol 2018;6(11):847-858.
+    caution: >
+      Calcium supplementation is not risk-free and dietary intake should be
+      assessed before supplements are added.
+
+  - id: bone_marrow_adiposity_direct
+    domain: bone
+    title: Directly reducing bone marrow adiposity
+    grade: D
+    triggers:
+      - variable: bmat_pdff_pct
+        operator: "is_present"
+        rationale: Shown whenever a marrow fat fraction has been measured
+      - variable: bmat_ff_mri_pct
+        operator: "is_present"
+        rationale: Shown whenever a marrow fat fraction has been measured
+    detail: >
+      No intervention has been shown to lower bone marrow adiposity and thereby
+      improve bone or functional outcomes.
+    effect: >
+      INSUFFICIENT EVIDENCE. Marrow adiposity rises with age and is inversely
+      associated with bone mineral density, and it responds to some systemic
+      exposures. But the association is not established as causal, no trial has
+      shown that lowering it improves fracture or function, and measurements
+      from MR spectroscopy, water-fat imaging and CT attenuation are not
+      interchangeable. Framing a recommendation as "reduce your marrow fat"
+      would be unsupported.
+    citation: >
+      Mechanistic and methodological basis: Bone Marrow Adiposity Society
+      working group papers on nomenclature and methodologies; no adequate
+      interventional evidence identified.
+    caution: >
+      Marrow fat fraction is site-specific. Values from the lumbar spine, femur
+      and tibia are not comparable with each other, and Dive will not pool them.
 
   # ------------------------------------------------------ trans-signalling
   - id: exercise_il6

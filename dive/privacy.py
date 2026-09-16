@@ -6,7 +6,15 @@ makes a provider unable to see what you send them. So the only enforceable
 guarantee is about **what is sent in the first place**, and that is what this
 module controls.
 
-Three egress modes, set by ``privacy.egress_mode``:
+Four egress modes, set by ``privacy.egress_mode``:
+
+``topic_only`` (default)
+    Only a **clinical question** leaves - the kind of thing a clinician would
+    type into PubMed. No values, no profile, no record. The provider is asked
+    what the evidence says about an intervention in a population; Dive then
+    matches that evidence to the participant locally. The provider never learns
+    that a specific person exists, let alone anything about them. See the note
+    on blind computation below.
 
 ``none``
     Nothing derived from participant records leaves the process. External
@@ -14,7 +22,7 @@ Three egress modes, set by ``privacy.egress_mode``:
     topics, but they receive no profile at all. Maximum privacy, least
     specificity.
 
-``deidentified`` (default)
+``deidentified``
     A profile may leave, stripped to clinical values only: no identifiers, no
     dates, no free text, age in 5-year bands, measurements rounded. This is the
     shape of data routinely shared for research, and it is what the audit log
@@ -30,11 +38,27 @@ is dropped, not passed through on the assumption it is harmless. A payload that
 still matches an identifier pattern after redaction is blocked outright rather
 than sent with a warning. If the scanner itself raises, the egress is blocked.
 
+**On "let the provider analyse it without knowing what it is".** That is
+computation on data the computer cannot read - fully homomorphic encryption, or
+a hardware enclave the vendor cannot inspect. For a general-purpose LLM API it
+does not exist: the model has to process plaintext to reason about it, and FHE
+for transformer inference remains orders of magnitude too slow to be a product.
+Any vendor claiming otherwise is describing a *retention* policy, not a
+*processing* one.
+
+What is achievable is to make the question carry no patient information in the
+first place. That is what ``topic_only`` does, and it reaches the same goal by a
+different route: the provider answers a literature question, Dive does the
+participant-specific reasoning locally, and there is nothing to keep private
+because nothing private was sent. For deployments that also need the model
+weights kept off third-party hardware, run a local model - the only arrangement
+where no data leaves your network at all.
+
 What this module does **not** claim: that de-identified clinical values are
 mathematically impossible to re-identify. A sufficiently unusual combination of
 measurements, cross-referenced against an external dataset, is a real (if
-remote) re-identification vector. ``egress_mode="none"`` and a locally hosted
-model are the only ways to reduce that to zero, and both are supported.
+remote) re-identification vector. ``topic_only``, ``none`` and a locally hosted
+model each reduce that to zero, and all three are supported.
 """
 
 from __future__ import annotations
@@ -53,11 +77,13 @@ __all__ = [
     "EgressGuard",
     "PrivacyPolicy",
     "deidentify_profile",
+    "build_topic_query",
+    "FINDING_TOPICS",
     "scan_for_identifiers",
     "redact",
 ]
 
-EgressMode = Literal["none", "deidentified", "full"]
+EgressMode = Literal["topic_only", "none", "deidentified", "full"]
 
 
 # --------------------------------------------------------------------------
@@ -89,10 +115,25 @@ IDENTIFYING_KEYS: frozenset[str] = frozenset({
     "study_uid", "series_uid", "sop_uid", "patient_name", "patient_id",
     "referrer", "clinician", "consultant", "gp", "site", "hospital", "ward",
     "notes", "free_text", "comment", "comments", "history",
+    # Quasi-identifiers. Ethnicity plus a region plus an unusual clinical
+    # profile can single somebody out even with no name attached, and a rare
+    # genotype is identifying on its own.
+    "ethnicity_self_reported", "ethnicity", "ethnic_group", "race",
+    "ethnicity_classification", "preferred_language", "migration_generation",
+    "country_iso3", "country", "region_code", "region", "latitude_band",
+    "urban_rural", "deprivation_decile", "imd",
+    "genetic_ancestry_pc1", "genetic_ancestry_pc2", "genetic_ancestry_pc3",
+    "actn3_r577x_dosage", "vdr_fokI_dosage", "col1a1_sp1_dosage",
+    "apoe_e4_dosage", "fto_rs9939609_dosage",
 })
 
 #: Clinical value fields permitted to leave in ``deidentified`` mode. Anything
 #: not named here is dropped. Adding to this list is a deliberate act.
+#:
+#: Note what is deliberately absent: ethnicity, country, region, deprivation and
+#: any genotype. Individually they look innocuous; together with a clinical
+#: profile they are among the strongest re-identification routes there is, and a
+#: rare genotype is identifying by itself.
 ALLOWED_CLINICAL_KEYS: frozenset[str] = frozenset({
     # demographics, coarsened
     "age_band", "sex",
@@ -215,18 +256,83 @@ def deidentify_profile(
 
 
 # --------------------------------------------------------------------------
+# Topic-only queries
+# --------------------------------------------------------------------------
+
+#: Finding key -> the clinical topic it maps to. Values never appear: a topic
+#: is a category, not a measurement, and two participants who cross the same
+#: threshold produce the identical query.
+FINDING_TOPICS: dict[str, str] = {
+    "low_grip": "low grip strength and sarcopenia",
+    "slow_gait": "slow gait speed and mobility limitation",
+    "low_sppb": "impaired short physical performance battery score",
+    "slow_chair": "impaired sit-to-stand performance",
+    "frail": "physical frailty phenotype",
+    "high_vat": "excess visceral adiposity",
+    "low_asmi": "low appendicular lean mass",
+    "obesity": "sarcopenic obesity",
+    "high_il6": "elevated circulating interleukin-6",
+    "bt_ratio": "interleukin-6 trans-signalling",
+    "low_bmd": "low bone mineral density and osteoporosis",
+    "high_bmat": "bone marrow adiposity",
+    "low_cortical": "cortical bone loss and reduced bone strength",
+}
+
+#: Broad population descriptors. Deliberately coarse - a literature query does
+#: not need a patient's age to be useful, and including one is the thin end of
+#: sending a profile.
+POPULATIONS: dict[str, str] = {
+    "older": "older adults",
+    "older_female": "older women",
+    "older_male": "older men",
+    "adult": "adults",
+}
+
+
+def build_topic_query(
+    findings: Sequence[str], population: str = "older", max_topics: int = 4
+) -> tuple[str, list[str]]:
+    """Turn threshold crossings into a literature question carrying no data.
+
+    Returns ``(query, unmapped_findings)``. The result is indistinguishable
+    from what a clinician would type into PubMed, and is identical for every
+    participant who crosses the same thresholds - which is precisely why it
+    discloses nothing about any of them.
+    """
+    topics: list[str] = []
+    unmapped: list[str] = []
+    for finding in findings:
+        topic = FINDING_TOPICS.get(finding)
+        if topic is None:
+            unmapped.append(finding)
+        elif topic not in topics:
+            topics.append(topic)
+
+    if not topics:
+        topics = ["physical function decline"]
+
+    who = POPULATIONS.get(population, POPULATIONS["older"])
+    subject = "; ".join(topics[:max_topics])
+    query = (
+        f"What does the published evidence show about interventions for {subject} "
+        f"in {who}?"
+    )
+    return query, unmapped
+
+
+# --------------------------------------------------------------------------
 # Policy and guard
 # --------------------------------------------------------------------------
 
 @dataclass
 class PrivacyPolicy:
-    egress_mode: EgressMode = "deidentified"
+    egress_mode: EgressMode = "topic_only"
     #: Minimum cohort size behind any aggregate statistic that leaves.
     min_aggregate_n: int = 5
     age_band_width: int = 5
     round_to: int = 2
     #: Refuse egress entirely when the destination is not on this list.
-    allowed_destinations: tuple[str, ...] = ("anthropic", "google")
+    allowed_destinations: tuple[str, ...] = ("anthropic", "google", "openai", "local")
     #: Write every egress decision to the audit log.
     audit: bool = True
     #: Hard kill switch. When True, no external call is permitted at all.
@@ -300,6 +406,15 @@ class EgressGuard:
         if self.policy.egress_mode == "none":
             decision.reasons.append(
                 "egress_mode 'none': no participant-derived data may leave this process"
+            )
+            self._audit(decision)
+            return {}, decision
+
+        if self.policy.egress_mode == "topic_only":
+            decision.reasons.append(
+                "egress_mode 'topic_only': no profile leaves this process. Only a generic "
+                "clinical question is sent, and the participant-specific reasoning is done "
+                "locally against the evidence that comes back."
             )
             self._audit(decision)
             return {}, decision

@@ -24,7 +24,23 @@ and it says when the retrieved evidence does not cover the person in front of
 it - an older adult with severe frailty is not well represented by a trial that
 recruited robust 65-year-olds, and it is expected to say so.
 
-**It never sees an identifier.** The profile is de-identified by
+**By default it never sees the participant at all.** Under the ``topic_only``
+egress mode - the default - the provider is asked a literature question, not a
+patient question: *what does the evidence show about interventions for low grip
+strength and frailty in older adults?* That query is identical for every
+participant who crosses the same thresholds, so it discloses nothing about any
+of them. Dive then matches the returned evidence to this participant's actual
+measured values **locally**, and writes the participant-specific sentences
+itself from those values. The result is specific advice with zero patient
+egress.
+
+This is the achievable form of "let the provider analyse it without knowing
+what it is". True blind computation - the provider processing data it cannot
+read - would need homomorphic encryption or a hardware enclave, neither of
+which exists for a general-purpose LLM API. Rather than pretend otherwise,
+Dive removes the patient from the question.
+
+**In ``deidentified`` mode it still never sees an identifier.** The profile is de-identified by
 ``dive.privacy`` before it reaches the prompt - no participant ID, no dates, no
 name, age in 5-year bands - and the resulting text is scanned again before any
 provider is contacted. The interface shows exactly which fields were withheld.
@@ -65,7 +81,36 @@ FINDING_SEARCH_TERMS: dict[str, tuple[str, ...]] = {
     "obesity": ("sarcopenic obesity", "weight loss", "older adults", "lean mass"),
     "high_il6": ("interleukin-6", "inflammation", "exercise training", "older adults"),
     "bt_ratio": ("IL-6 trans-signalling", "soluble gp130", "soluble IL-6 receptor"),
+    "low_bmd": ("osteoporosis", "bone mineral density", "older adults", "fracture prevention"),
+    "high_bmat": ("bone marrow adiposity", "marrow fat", "bone mineral density"),
+    "low_cortical": ("cortical bone", "bone strength", "pQCT", "older adults"),
 }
+
+
+#: Which measured variables back each finding, used to pick the right
+#: threshold sentence when composing the local rationale.
+_FINDING_VARIABLES: dict[str, tuple[str, ...]] = {
+    "low_grip": ("max_grip_kg",),
+    "slow_gait": ("gait_speed_ms",),
+    "low_sppb": ("sppb_total",),
+    "slow_chair": ("chair_time_s",),
+    "frail": ("fried_score",),
+    "high_vat": ("vat_mass_g", "waist_cm", "ct_vat_area_cm2"),
+    "low_asmi": ("asmi", "appendicular_lean_mass_kg"),
+    "obesity": ("bmi",),
+    "high_il6": ("IL6_pg_mL", "crp_mg_L"),
+    "bt_ratio": ("BT_ratio",),
+    "low_bmd": ("bmd_t_score", "bmd_total_hip", "pqct_trabecular_vbmd"),
+    "high_bmat": ("bmat_pdff_pct", "bmat_ff_mri_pct"),
+    "low_cortical": ("pqct_cortical_vbmd", "pqct_cortical_thickness_mm", "pqct_ssi_mm3"),
+}
+
+
+def _FINDING_KEYWORDS_FOR(findings: Sequence[str]) -> set[str]:
+    keywords: set[str] = set()
+    for finding in findings:
+        keywords.update(_FINDING_VARIABLES.get(finding, ()))
+    return keywords or {""}
 
 
 # --------------------------------------------------------------------------
@@ -136,6 +181,24 @@ class AdvisorRecommendation:
     citation_ids: list[str] = field(default_factory=list)
     studies: list[Study] = field(default_factory=list)
     dropped_citations: list[str] = field(default_factory=list)
+    #: Which of this participant's findings this intervention addresses.
+    matched_findings: list[str] = field(default_factory=list)
+    #: Formal appraisal of each cited study (OCEBM derived; GRADE/RoB2/AMSTAR-2
+    #: shown as unassessed until a human enters them).
+    appraisals: list[Any] = field(default_factory=list)
+    #: True when the participant-specific sentence was written locally by Dive
+    #: from measured values, rather than by the model.
+    matched_locally: bool = False
+
+    def best_level(self) -> int:
+        levels = [a.level for a in self.appraisals if getattr(a, "level", None)]
+        return min(levels) if levels else 5
+
+    def evidence_summary(self) -> str:
+        if not self.appraisals:
+            return "not appraised"
+        best = min(self.appraisals, key=lambda a: a.level)
+        return best.headline()
 
 
 @dataclass
@@ -149,6 +212,10 @@ class AdvisorResult:
     n_citations_dropped: int = 0
     model: str = MODEL
     provider: str = ""
+    #: The exact text that left this process. Empty under topic_only means the
+    #: query itself; never a profile.
+    outbound_query: str = ""
+    egress_mode: str = ""
     usage: dict[str, Any] = field(default_factory=dict)
     #: Fields removed before anything left this process.
     withheld_fields: list[str] = field(default_factory=list)
@@ -208,6 +275,98 @@ for this participant, record it in evidence_gaps. An accurate "the evidence does
 not address this" is more valuable than a confident extrapolation.
 
 Write for a researcher: precise, plain, no hedging filler and no marketing tone."""
+
+
+#: Schema for the topic-only call. Note what is absent: nothing about an
+#: individual. The model summarises evidence about interventions; Dive decides
+#: locally which of them apply to whom.
+EVIDENCE_SCHEMA: dict[str, Any] = {
+    "type": "object",
+    "properties": {
+        "interventions": {
+            "type": "array",
+            "items": {
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "The intervention."},
+                    "population": {
+                        "type": "string",
+                        "description": "Who the retrieved trials actually enrolled.",
+                    },
+                    "finding": {
+                        "type": "string",
+                        "description": "What the evidence shows, with effect magnitude.",
+                    },
+                    "applies_when": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "low_grip", "slow_gait", "low_sppb", "slow_chair", "frail",
+                                "high_vat", "low_asmi", "obesity", "high_il6", "bt_ratio",
+                                "low_bmd", "high_bmat", "low_cortical",
+                            ],
+                        },
+                        "description": (
+                            "Which clinical findings this intervention addresses. Dive "
+                            "matches these locally against the participant."
+                        ),
+                    },
+                    "evidence_strength": {
+                        "type": "string",
+                        "enum": ["strong", "moderate", "limited", "insufficient"],
+                    },
+                    "applicability_caveat": {
+                        "type": "string",
+                        "description": "How trial populations may differ from a frail older adult.",
+                    },
+                    "citation_ids": {
+                        "type": "array",
+                        "items": {"type": "string"},
+                        "description": "Identifiers taken verbatim from RETRIEVED EVIDENCE.",
+                    },
+                },
+                "required": [
+                    "name", "population", "finding", "applies_when",
+                    "evidence_strength", "applicability_caveat", "citation_ids",
+                ],
+                "additionalProperties": False,
+            },
+        },
+        "evidence_gaps": {"type": "array", "items": {"type": "string"}},
+    },
+    "required": ["interventions", "evidence_gaps"],
+    "additionalProperties": False,
+}
+
+
+EVIDENCE_SYSTEM_PROMPT = """You are summarising published evidence for Dive, a clinical \
+research platform. You are given retrieved studies and a clinical topic.
+
+You are NOT given a patient, and you must not ask for one or assume one. Your job is \
+to say what the retrieved evidence shows about interventions for this topic, so that \
+the platform can match it against individual records on its own infrastructure.
+
+Absolute rules:
+
+1. CITATIONS. Cite ONLY the studies in the RETRIEVED EVIDENCE block, using their exact \
+bracketed identifiers. Do not cite, mention or allude to any other paper, author, trial \
+name or guideline - not even one you are confident exists. Every intervention must carry \
+at least one identifier from the block. If the retrieved evidence does not support a \
+point, leave it out.
+
+2. NO INVENTED NUMBERS. Effect sizes, sample sizes and durations must come from the \
+retrieved abstracts. If an abstract does not state a magnitude, say so rather than \
+supplying one.
+
+3. APPLICABILITY. For each intervention, state plainly who the trials actually enrolled \
+and how that population may differ from a frail older adult. This is required.
+
+4. HONEST GAPS. Where the retrieved evidence does not cover something important for this \
+topic, record it in evidence_gaps. "The evidence does not address this" is a useful \
+answer.
+
+Write for a researcher: precise, plain, no hedging filler."""
 
 
 RESPONSE_SCHEMA: dict[str, Any] = {
@@ -336,6 +495,10 @@ class Advisor:
                 literature=retrieved,
             )
 
+        # --- topic-only: the participant never leaves this process ----------
+        if self.cfg.privacy.egress_mode == "topic_only":
+            return self._advise_topic_only(brief, retrieved, max_tokens)
+
         # --- privacy boundary: de-identify before the profile is written into
         # any prompt. `withheld` is surfaced so the user sees what was removed.
         safe_profile, decision = self.guard.review_profile(
@@ -389,6 +552,126 @@ class Advisor:
         result = self._verify(payload, retrieved, response)
         result.withheld_fields = decision.dropped_fields
         return result
+
+    # -- topic-only path --------------------------------------------------
+
+    def _advise_topic_only(
+        self, brief: ParticipantBrief, retrieved: LiteratureResult, max_tokens: int
+    ) -> AdvisorResult:
+        """Ask the provider about a topic; match the answer to the participant here.
+
+        The outbound query names a clinical subject and a broad population. It
+        contains no values, no identifiers and no record, and is byte-identical
+        for any two participants who cross the same thresholds. Everything
+        participant-specific below this line is computed locally.
+        """
+        from .evidence_grading import appraise
+        from .privacy import build_topic_query
+
+        population = "older"
+        if brief.sex_label in {"female", "male"}:
+            population = f"older_{brief.sex_label}"
+        query, _ = build_topic_query(brief.findings, population=population)
+
+        evidence_block = "\n\n".join(s.as_prompt_record() for s in retrieved.studies)
+        user_content = (
+            f"CLINICAL TOPIC\n{query}\n\n"
+            f"RETRIEVED EVIDENCE ({len(retrieved.studies)} studies - the only sources you "
+            f"may cite)\n\n{evidence_block}\n\n"
+            "Summarise what these studies show about interventions for this topic."
+        )
+
+        response = self.router.complete(
+            system=EVIDENCE_SYSTEM_PROMPT, user=user_content,
+            schema=EVIDENCE_SCHEMA, max_tokens=max_tokens,
+        )
+        if not response.ok:
+            return AdvisorResult(
+                available=False, reason=response.reason, literature=retrieved,
+                blocked_by_guard=response.blocked_by_guard,
+                outbound_query=query, egress_mode="topic_only",
+            )
+
+        payload = response.parsed if response.parsed is not None else _safe_json(response.text)
+        if payload is None:
+            return AdvisorResult(
+                available=False, reason="the model's response was not valid JSON",
+                literature=retrieved, outbound_query=query, egress_mode="topic_only",
+            )
+
+        lookup = retrieved.by_identifier()
+        findings = set(brief.findings)
+        recommendations: list[AdvisorRecommendation] = []
+        dropped_total = 0
+
+        for item in payload.get("interventions", []):
+            verified, unverifiable = LiteratureClient.verify_identifiers(
+                item.get("citation_ids", []), retrieved
+            )
+            dropped_total += len(unverifiable)
+            if not verified:
+                continue
+
+            # --- LOCAL MATCHING. The model said which findings an intervention
+            # addresses; Dive decides whether THIS participant has them, using
+            # values that never left.
+            applies = [f for f in item.get("applies_when", []) if f in findings]
+            if not applies:
+                continue
+
+            studies = [lookup[v] for v in verified if v in lookup]
+            recommendations.append(
+                AdvisorRecommendation(
+                    title=str(item.get("name", "")).strip(),
+                    rationale=str(item.get("finding", "")).strip(),
+                    specific_to_participant=self._local_rationale(brief, applies),
+                    evidence_strength=str(item.get("evidence_strength", "limited")),
+                    applicability_caveat=str(item.get("applicability_caveat", "")).strip(),
+                    citation_ids=verified,
+                    studies=studies,
+                    dropped_citations=unverifiable,
+                    matched_findings=applies,
+                    appraisals=[appraise(s.identifier, s.pub_types) for s in studies],
+                    matched_locally=True,
+                )
+            )
+
+        recommendations.sort(key=lambda r: (r.best_level(), r.title))
+
+        return AdvisorResult(
+            recommendations=recommendations,
+            evidence_gaps=[str(g) for g in payload.get("evidence_gaps", [])],
+            available=True,
+            literature=retrieved,
+            n_studies_retrieved=len(retrieved.studies),
+            n_citations_dropped=dropped_total,
+            model=response.model,
+            provider=response.provider,
+            usage=response.usage or {},
+            outbound_query=query,
+            egress_mode="topic_only",
+        )
+
+    @staticmethod
+    def _local_rationale(brief: ParticipantBrief, applies: Sequence[str]) -> str:
+        """Write the participant-specific sentence locally, from measured values.
+
+        This text is generated here, from the thresholds this participant
+        actually crossed. The model never saw any of it.
+        """
+        reasons = [
+            d for d in brief.finding_details
+            if any(k in d for k in _FINDING_KEYWORDS_FOR(applies))
+        ]
+        if not reasons:
+            reasons = brief.finding_details[:2]
+        if not reasons:
+            return "Matched on this participant's recorded findings."
+        return (
+            "Applies to this participant because: "
+            + "; ".join(sorted(set(reasons))[:3])
+            + ". (Matched locally from measured values - these were not sent anywhere.)"
+        )
 
     # -- verification -----------------------------------------------------
 
@@ -466,6 +749,10 @@ def brief_from_profile(
         "exercise_il6": "high_il6",
         "adiposity_il6": "high_il6",
         "bt_ratio_direct": "bt_ratio",
+        "impact_resistance_bone": "low_bmd",
+        "bone_pharmacotherapy_referral": "low_bmd",
+        "calcium_vitamin_d_bone": "low_bmd",
+        "bone_marrow_adiposity_direct": "high_bmat",
     }
 
     findings: list[str] = []

@@ -122,6 +122,21 @@ def test_advisor_reports_unavailable_when_no_provider_is_usable(monkeypatch):
     assert "ANTHROPIC_API_KEY" in reason and "GEMINI_API_KEY" in reason
 
 
+def test_under_the_default_mode_no_profile_is_built_at_all():
+    """topic_only sends a literature question; the participant stays local."""
+    from dive.privacy import PrivacyPolicy, build_topic_query
+
+    assert PrivacyPolicy().egress_mode == "topic_only"
+    brief = brief_from_profile({
+        "sex": 1.0, "age_years": 79.4, "max_grip_kg": 13.5, "fried_score": 3,
+        "participant_id": "WL042",
+    })
+    query, _ = build_topic_query(brief.findings, "older_female")
+    for forbidden in ("WL042", "13.5", "79.4", "3"):
+        assert forbidden not in query
+    assert "older women" in query
+
+
 def test_the_advisor_never_puts_an_identifier_in_its_prompt():
     """The end-to-end privacy contract, asserted on the exact prompt text."""
     from dive.privacy import EgressGuard, PrivacyPolicy
@@ -132,7 +147,7 @@ def test_the_advisor_never_puts_an_identifier_in_its_prompt():
         "max_grip_kg": 13.5, "gait_speed_ms": 0.62,
     }
     brief = brief_from_profile(profile)
-    safe, decision = EgressGuard(PrivacyPolicy()).review_profile(
+    safe, decision = EgressGuard(PrivacyPolicy(egress_mode="deidentified")).review_profile(
         brief.measurements | {"age_years": 79.4, "sex": "female"}, "anthropic"
     )
     prompt = brief.as_prompt_block(safe)

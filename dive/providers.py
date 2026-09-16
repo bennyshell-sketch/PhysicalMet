@@ -1,10 +1,10 @@
 """External model providers, behind one interface and one privacy boundary.
 
-Dive can use Claude or Gemini. Neither is called directly from anywhere else in
-the codebase: every request passes through :class:`~dive.privacy.EgressGuard`
+Dive can use Claude, Gemini or OpenAI. None is called directly from anywhere
+else in the codebase: every request passes through :class:`~dive.privacy.EgressGuard`
 first, and a blocked decision means the HTTP call is never made.
 
-The point of routing both providers through a single chokepoint is that the
+The point of routing every provider through a single chokepoint is that the
 privacy question then has exactly one answer to audit. "What did we send to
 Google?" is answered by the audit log, not by reading every call site.
 
@@ -43,12 +43,13 @@ __all__ = [
     "LLMProvider",
     "ClaudeProvider",
     "GeminiProvider",
+    "OpenAIProvider",
     "LocalProvider",
     "ProviderRouter",
     "available_providers",
 ]
 
-ProviderName = Literal["anthropic", "google", "local"]
+ProviderName = Literal["anthropic", "google", "openai", "local"]
 
 
 @dataclass
@@ -242,6 +243,82 @@ class GeminiProvider(LLMProvider):
 
 
 # --------------------------------------------------------------------------
+# OpenAI
+# --------------------------------------------------------------------------
+
+class OpenAIProvider(LLMProvider):
+    name: ProviderName = "openai"
+    default_model = "gpt-4o"
+    key_env = "OPENAI_API_KEY"
+
+    ENDPOINT = "https://api.openai.com/v1/chat/completions"
+
+    def _sdk_available(self) -> tuple[bool, str]:
+        return True, ""     # REST; no SDK dependency
+
+    def complete(
+        self, system: str, user: str, schema: dict | None = None, max_tokens: int = 16000
+    ) -> ProviderResponse:
+        ok, reason = self.available()
+        if not ok:
+            return ProviderResponse(provider=self.name, model=self.model, reason=reason)
+
+        payload: dict[str, Any] = {
+            "model": self.model,
+            "max_completion_tokens": max_tokens,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": user},
+            ],
+        }
+        if schema is not None:
+            payload["response_format"] = {
+                "type": "json_schema",
+                "json_schema": {"name": "dive_response", "strict": True, "schema": schema},
+            }
+
+        request = urllib.request.Request(
+            self.ENDPOINT,
+            data=json.dumps(payload).encode(),
+            headers={
+                "Content-Type": "application/json",
+                "Authorization": f"Bearer {self.secret.resolve() or ''}",
+            },
+            method="POST",
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=180) as handle:
+                body = json.loads(handle.read().decode())
+        except urllib.error.HTTPError as exc:
+            detail = exc.read().decode()[:300] if hasattr(exc, "read") else ""
+            return ProviderResponse(
+                provider=self.name, model=self.model, reason=f"HTTP {exc.code}: {detail}"
+            )
+        except Exception as exc:
+            return ProviderResponse(
+                provider=self.name, model=self.model,
+                reason=f"{type(exc).__name__}: {exc}",
+            )
+
+        choices = body.get("choices", [])
+        if not choices:
+            return ProviderResponse(
+                provider=self.name, model=self.model, reason="no choice returned"
+            )
+        text = choices[0].get("message", {}).get("content", "") or ""
+        usage = body.get("usage", {})
+        return ProviderResponse(
+            text=text, parsed=_safe_json(text) if schema else None,
+            provider=self.name, model=self.model, ok=bool(text),
+            reason="" if text else "empty response",
+            usage={
+                "input_tokens": usage.get("prompt_tokens"),
+                "output_tokens": usage.get("completion_tokens"),
+            },
+        )
+
+
+# --------------------------------------------------------------------------
 # Local / self-hosted
 # --------------------------------------------------------------------------
 
@@ -320,6 +397,7 @@ class LocalProvider(LLMProvider):
 PROVIDERS: dict[str, type[LLMProvider]] = {
     "anthropic": ClaudeProvider,
     "google": GeminiProvider,
+    "openai": OpenAIProvider,
     "local": LocalProvider,
 }
 
@@ -339,7 +417,7 @@ class ProviderRouter:
 
     def __init__(
         self,
-        order: Sequence[ProviderName] = ("anthropic", "google"),
+        order: Sequence[ProviderName] = ("anthropic", "google", "openai"),
         guard: EgressGuard | None = None,
         settings: Settings | None = None,
         models: dict[str, str] | None = None,

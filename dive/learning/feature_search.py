@@ -26,6 +26,12 @@ Three defences, applied together:
    participants cannot be evaluated honestly, and a +0.004 AUC gain is not a
    finding.
 
+4. **A screen on protected attributes.** Self-reported ethnicity and race are
+   refused as candidate features before anything is fitted. They are not
+   biological variables, and the algorithms that treated them as such had to be
+   withdrawn - see ``dive/fairness.py``. Genetic ancestry components are a
+   different variable and are ordinary candidates.
+
 The expensive part is defence 2 - it costs ``n_permutations`` x ``n_candidates``
 model fits. That cost is the point. It is what separates a metric that helps
 from one that happened to look good once.
@@ -207,6 +213,18 @@ def search_features(
         registry = MetricRegistry(cfg)
         candidates = registry.candidate_features(exclude=set(base) | {outcome})
     candidates = [c for c in candidates if c in frame.columns and c not in base]
+
+    # Protected attributes are refused before anything is fitted, so a
+    # self-reported social category cannot become a predictor by accident.
+    # dive/fairness.py explains why this is not merely a policy preference.
+    from ..fairness import screen_features
+
+    candidates, refused = screen_features(
+        candidates,
+        allow_protected=getattr(cfg, "allow_protected_features", False),
+    )
+    for name, why in refused:
+        warnings_out.append(f"'{name}' excluded as a model feature: {why}")
 
     base_auc = _fit_score(frame, base, outcome, seed, n_splits)
     if not np.isfinite(base_auc):

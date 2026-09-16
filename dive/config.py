@@ -222,6 +222,11 @@ class Settings:
     #: predictions outside the model's competence are withheld, not guessed.
     strict_evidence_mode: bool = True
 
+    #: Allow self-reported ethnicity or race to be used as a model FEATURE.
+    #: Off by default and logged when enabled - see dive/fairness.py for why
+    #: this is not a neutral configuration choice.
+    allow_protected_features: bool = False
+
     def active_workbook(self) -> Path:
         """Return the workbook the pipeline should read, given ``data_source``."""
         if self.data_source == "real":
@@ -244,6 +249,7 @@ _SCALAR_ENV_MAP: dict[str, tuple[str, ...]] = {
     "DATA_SOURCE": ("data_source",),
     "DEPLOYMENT_LABEL": ("deployment_label",),
     "STRICT_EVIDENCE_MODE": ("strict_evidence_mode",),
+    "ALLOW_PROTECTED_FEATURES": ("allow_protected_features",),
     "RANDOM_SEED": ("model", "random_seed"),
     "OLDER_AGE_THRESHOLD": ("cohort", "older_age_threshold"),
     "CONFORMAL_ALPHA": ("model", "conformal_alpha"),

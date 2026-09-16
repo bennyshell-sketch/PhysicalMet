@@ -32,4 +32,5 @@ data/metrics.json
 # Runtime state and audit trail - never commit
 data/autolearn_state.json
 data/audit.jsonl
+data/calibration.json
 *.enc

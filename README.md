@@ -90,6 +90,9 @@ workbook has a quirk that isn't handled, it shows up there as a surprise.
 | `dive/recommend.py` | Evidence-matched recommendations from a curated library |
 | `dive/literature.py` | Retrieval of real, verifiable studies + citation verification |
 | `dive/advisor.py` | Participant-specific advice grounded in retrieved evidence |
+| `dive/calibration.py` | Scanner QC, precision, least significant change, comparability |
+| `dive/fairness.py` | Subgroup auditing; protected attributes screened out of models |
+| `dive/evidence_grading.py` | OCEBM, GRADE, Cochrane RoB 2, AMSTAR-2 |
 | `dive/privacy.py` | The egress boundary: de-identification, scanning, audit |
 | `dive/security.py` | Audit chain, encryption at rest, auth, upload validation |
 | `dive/providers.py` | Claude / Gemini / local models behind one guarded interface |
@@ -161,7 +164,13 @@ quietly omitted or softened into advice.
 
 ## Adding any health metric, including imaging
 
-Dive ships with 37 core metrics across physical function, body composition,
+Dive ships with 137 core metrics across fifteen domains — physical function,
+body composition, imaging, biochemical, microbiological, histological, gross
+anatomical, genetic, epigenetic, geographic context, cognition and activity.
+See [docs/OMICS.md](docs/OMICS.md) for what each domain contains and where the
+measurement traps are.
+
+Older material, still accurate:
 **DEXA** (T-score and Z-score, site-specific BMD, trabecular bone score,
 appendicular lean mass), **CT** (L3 skeletal muscle area, muscle attenuation in
 Hounsfield units, visceral / subcutaneous / intermuscular adipose area,
@@ -415,7 +424,7 @@ cohort may legitimately differ, and the point is that you are told.
 
 ```bash
 python -m dive.validation     # 17 checks
-python -m pytest tests/ -q        # 149 tests
+python -m pytest tests/ -q        # 181 tests
 ```
 
 Four families of check:

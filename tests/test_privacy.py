@@ -33,6 +33,30 @@ IDENTIFIED = {
 
 # --- de-identification ----------------------------------------------------
 
+def test_a_topic_query_carries_no_participant_data():
+    """Two participants crossing the same thresholds produce identical queries."""
+    from dive.privacy import build_topic_query
+
+    first, _ = build_topic_query(["low_grip", "frail"], "older_female")
+    second, _ = build_topic_query(["low_grip", "frail"], "older_female")
+    assert first == second
+    for forbidden in ("13.5", "WL042", "79", "Jane"):
+        assert forbidden not in first
+
+
+def test_quasi_identifiers_never_leave():
+    """Ethnicity, region, deprivation and genotype are re-identification routes."""
+    clean, dropped = deidentify_profile({
+        "ethnicity_self_reported": "South Asian", "country_iso3": "GBR",
+        "region_code": "UKF2", "deprivation_decile": 2, "apoe_e4_dosage": 2,
+        "genetic_ancestry_pc1": 0.04, "max_grip_kg": 13.5,
+    })
+    assert clean == {"max_grip_kg": 13.5}
+    for field in ("ethnicity_self_reported", "country_iso3", "deprivation_decile",
+                  "apoe_e4_dosage", "genetic_ancestry_pc1"):
+        assert field in dropped
+
+
 def test_every_identifier_is_removed():
     clean, dropped = deidentify_profile(IDENTIFIED)
     serialised = json.dumps(clean)
@@ -104,8 +128,17 @@ def test_redact_replaces_rather_than_removes():
 
 # --- the guard ------------------------------------------------------------
 
-def test_guard_permits_a_deidentified_profile():
+def test_topic_only_is_the_default_and_blocks_profile_egress():
+    """The default mode sends a literature question, never a profile."""
     guard = EgressGuard(PrivacyPolicy())
+    assert PrivacyPolicy().egress_mode == "topic_only"
+    _, decision = guard.review_profile(IDENTIFIED, "anthropic")
+    assert not decision.allowed
+    assert "topic_only" in decision.reasons[0]
+
+
+def test_guard_permits_a_deidentified_profile():
+    guard = EgressGuard(PrivacyPolicy(egress_mode="deidentified"))
     clean, decision = guard.review_profile(IDENTIFIED, "anthropic")
     assert decision.allowed
     assert "participant_id" in decision.dropped_fields
@@ -155,7 +188,7 @@ def test_guard_writes_an_audit_record(tmp_path):
     from dive.security import AuditLog
 
     audit = tmp_path / "audit.jsonl"
-    guard = EgressGuard(PrivacyPolicy(), audit_path=audit)
+    guard = EgressGuard(PrivacyPolicy(egress_mode="deidentified"), audit_path=audit)
     guard.review_profile(IDENTIFIED, "anthropic")
 
     entries = AuditLog(audit).tail()
