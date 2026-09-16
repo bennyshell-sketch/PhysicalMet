@@ -126,14 +126,75 @@ if /i "%~1"=="data" (
   exit /b 0
 )
 
+set "LOG=%~dp0dive-log.txt"
+
+if /i "%~1"=="diagnose" goto :diagnose
+
 echo   Starting Dive.
-echo   Your browser will open at http://localhost:8501
+echo   Your browser should open at http://localhost:8501
 echo.
 echo   Leave this window open while you use it.
 echo   Press Ctrl+C here to stop.
 echo.
+
 "%PY%" -m streamlit run app/app.py
+set "RC=%ERRORLEVEL%"
 
 echo.
+if not "%RC%"=="0" goto :failed
 echo   Dive has stopped.
 pause
+exit /b 0
+
+:failed
+echo   ------------------------------------------------------------
+echo   Dive stopped unexpectedly (exit code %RC%).
+echo.
+echo   The error is in the lines above - scroll up to read it.
+echo.
+echo   To save it to a file you can send on, close this window and
+echo   run this instead:
+echo.
+echo     Hold Shift, right-click this folder, choose
+echo     "Open PowerShell window here", then type:
+echo.
+echo        .\START-DIVE-windows.bat diagnose
+echo.
+echo   That writes everything to dive-log.txt next to this file.
+echo   ------------------------------------------------------------
+echo.
+pause
+exit /b 1
+
+:diagnose
+echo   Diagnostic run. Writing everything to:
+echo     %LOG%
+echo.
+echo   This will take a moment...
+(
+  echo === Dive diagnostic ===
+  date /t
+  time /t
+  echo.
+  echo --- python ---
+  "%PY%" --version
+  echo.
+  echo --- installed packages ---
+  "%PY%" -m pip list
+  echo.
+  echo --- import check ---
+  "%PY%" -c "import streamlit, pandas, numpy, scipy, statsmodels, sklearn, plotly; print('core imports OK')"
+  echo.
+  echo --- loading the dataset ---
+  "%PY%" -c "from dive.data_pipeline import load_dataset; d=load_dataset(); print('participants:', d.report.n_participants)"
+  echo.
+  echo --- starting the app ---
+  "%PY%" -m streamlit run app/app.py
+) > "%LOG%" 2>&1
+
+echo.
+echo   Done. Open this file and send it on:
+echo     %LOG%
+echo.
+pause
+exit /b 0

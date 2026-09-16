@@ -7,7 +7,9 @@ textColor = "#1A1A18"
 font = "sans serif"
 
 [server]
-headless = true
+# headless is deliberately NOT set here. On a desktop it must stay false so the
+# browser opens by itself; container/CI runs pass --server.headless=true on the
+# command line instead.
 
 [browser]
 gatherUsageStats = false
