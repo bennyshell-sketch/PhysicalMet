@@ -1,8 +1,8 @@
 # Dive - hosted deployment.
 #
-#   1. cp .env.example .env   and fill it in
-#   2. put your domain in the Caddyfile
-#   3. docker compose up -d
+#   1. cp .env.example .env   and fill it in - the domain goes there, and both
+#      this file and the Caddyfile read it from there
+#   2. docker compose up -d --build
 #
 # Caddy terminates TLS and obtains certificates from Let's Encrypt
 # automatically. Dive itself is never exposed to the internet: it listens only
