@@ -10,7 +10,12 @@
 #   * a healthcheck, so an orchestrator can tell a wedged container from a
 #     healthy one
 
-FROM python:3.12-slim AS base
+# The base image is a build argument so that a deployment which is required to
+# pull from an internal mirror - common in university and NHS environments -
+# can point at it without editing this file:
+#   docker compose build --build-arg PYTHON_IMAGE=registry.example.org/python:3.12-slim
+ARG PYTHON_IMAGE=python:3.12-slim
+FROM ${PYTHON_IMAGE} AS base
 
 ENV PYTHONUNBUFFERED=1 \
     PYTHONDONTWRITEBYTECODE=1 \

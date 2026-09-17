@@ -31,7 +31,7 @@ synthetic cohort and opens the interface at http://localhost:8501. No API keys,
 no internet, nothing sent anywhere. After that it starts in seconds.
 
 ```bash
-./start-dive-mac-linux.sh check    # 17 validation checks, then 253 tests
+./start-dive-mac-linux.sh check    # 17 validation checks, then 254 tests
 ```
 
 **New here? Read [QUICKSTART.md](QUICKSTART.md)** — what each screen does, how to
@@ -450,7 +450,7 @@ cohort may legitimately differ, and the point is that you are told.
 
 ```bash
 python -m dive.validation     # 17 checks
-python -m pytest tests/ -q        # 253 tests
+python -m pytest tests/ -q        # 254 tests
 ```
 
 Four families of check:

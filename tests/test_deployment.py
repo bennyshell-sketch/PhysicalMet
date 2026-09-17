@@ -298,3 +298,11 @@ def test_every_screen_is_behind_a_capability():
     assert listed <= set(_screen_capabilities()), (
         f"screens with no capability: {listed - set(_screen_capabilities())}"
     )
+
+
+def test_the_base_image_can_come_from_an_internal_mirror():
+    """Deployments that may not pull from Docker Hub should not have to fork the file."""
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+
+    assert "ARG PYTHON_IMAGE=python:3.12-slim" in dockerfile
+    assert "FROM ${PYTHON_IMAGE}" in dockerfile

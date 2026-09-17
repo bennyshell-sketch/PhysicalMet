@@ -47,6 +47,13 @@ git clone <your repository url> dive
 cd dive
 ```
 
+If your institution requires images to come from an internal registry rather
+than Docker Hub, point the build at it — no file needs editing:
+
+```bash
+docker compose build --build-arg PYTHON_IMAGE=registry.example.org/python:3.12-slim
+```
+
 ### Generate the secrets
 
 ```bash
