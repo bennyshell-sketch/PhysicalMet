@@ -1,0 +1,46 @@
+# Dive settings.
+#
+# This file is committed and holds shared defaults. For machine-specific or
+# sensitive settings create `settings.local.yaml` (gitignored), which is read
+# after this file and overrides it. Environment variables prefixed DIVE_
+# override both.
+
+# THE SWAP-IN POINT: "synthetic" or "real"
+data_source: synthetic
+
+# Shown in the interface masthead.
+deployment_label: "Clinical prediction platform"
+
+# Withhold predictions the models cannot support, rather than guessing.
+strict_evidence_mode: true
+
+# Let the owner console write to project source files.
+# OFF by default. Editing source through a web interface is remote code
+# execution by design - a path allowlist narrows the blast radius, it does not
+# remove it. Leave this false unless Dive is on localhost or a trusted network.
+allow_source_editing: false
+
+privacy:
+  # topic_only    - only a generic clinical question leaves; matching is local
+  # none          - nothing participant-derived leaves this process
+  # deidentified  - clinical values only: no identifiers, no dates, banded age
+  # full          - refused by the guard; the mode exists so the choice is explicit
+  egress_mode: topic_only
+  # Absolute kill switch: no external model call of any kind.
+  offline_only: false
+  # Small-cell suppression for any aggregate that leaves.
+  min_aggregate_n: 5
+  age_band_width: 5
+  allowed_destinations: ["anthropic", "google", "openai", "local"]
+
+cohort:
+  # An older participant is aged 65 or above.
+  older_age_threshold: 65.0
+  grip_decline_threshold_kg: 2.0
+  tug_sentinel_value: 40.0
+
+model:
+  random_seed: 20260916
+  conformal_alpha: 0.05          # -> 95% prediction intervals
+  abstain_min_training_n: 40
+  enable_gradient_boosting: true # sensitivity check only, never the headline

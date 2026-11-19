@@ -1,0 +1,41 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.eggs/
+build/
+dist/
+.venv/
+venv/
+.pytest_cache/
+.ipynb_checkpoints/
+
+# Project data — never commit participant data
+data/real/*
+!data/real/.gitkeep
+data/uploads/*
+!data/uploads/.gitkeep
+data/synthetic/**/*.xlsx
+data/synthetic/validation/
+data/models/*
+!data/models/.gitkeep
+outputs/
+*.log
+dive-log.txt
+.env
+
+# OS
+.DS_Store
+Thumbs.db
+data/ingested/
+# Registered metrics are per-deployment state, not source
+data/metrics.json
+# Runtime state and audit trail - never commit
+data/autolearn_state.json
+data/audit.jsonl
+# Password hashes and lockout state - never commit
+data/accounts.json
+data/calibration.json
+data/source_backups/
+*.enc
+Caddyfile.local

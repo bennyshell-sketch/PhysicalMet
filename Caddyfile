@@ -1,0 +1,35 @@
+# The domain and the contact address both come from .env, so there is only one
+# place to set them. Caddy obtains and renews the TLS certificate itself.
+{
+	email {$DIVE_TLS_EMAIL}
+}
+
+{$DIVE_PUBLIC_HOSTNAME} {
+	encode gzip
+
+	# Streamlit's live connection is a websocket; reverse_proxy carries the
+	# upgrade through. Host is passed unchanged because Dive checks it against
+	# its own allow-list.
+	reverse_proxy dive:8501 {
+		header_up Host {host}
+		header_up X-Real-IP {remote_host}
+		header_up X-Forwarded-For {remote_host}
+		header_up X-Forwarded-Proto {scheme}
+	}
+
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		Permissions-Policy "geolocation=(), microphone=(), camera=()"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 10MiB
+			roll_keep 10
+		}
+	}
+}

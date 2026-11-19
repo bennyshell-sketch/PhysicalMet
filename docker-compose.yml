@@ -1,0 +1,77 @@
+# Dive - hosted deployment.
+#
+#   1. cp .env.example .env   and fill it in - the domain goes there, and both
+#      this file and the Caddyfile read it from there
+#   2. docker compose up -d --build
+#
+# Caddy terminates TLS and obtains certificates from Let's Encrypt
+# automatically. Dive itself is never exposed to the internet: it listens only
+# on the internal network, and only Caddy can reach it.
+
+services:
+  dive:
+    build: .
+    image: dive:latest
+    restart: unless-stopped
+    # No ports published. The only route in is through the proxy.
+    expose:
+      - "8501"
+    environment:
+      # The domain the proxy serves, with no scheme or port. Sets the websocket
+      # Host allow-list, so a request arriving under any other name is refused.
+      DIVE_PUBLIC_HOSTNAME: ${DIVE_PUBLIC_HOSTNAME:?set DIVE_PUBLIC_HOSTNAME in .env}
+      # Required. Without it, sessions die on restart and break across replicas.
+      DIVE_SESSION_SECRET: ${DIVE_SESSION_SECRET:?set DIVE_SESSION_SECRET in .env}
+      # Required. Encrypts uploaded cohort files at rest. It does not
+      # encrypt trained models, ingested batches or the audit log - run
+      # the volume on an encrypted disk for those.
+      DIVE_ENCRYPTION_KEY: ${DIVE_ENCRYPTION_KEY:?set DIVE_ENCRYPTION_KEY in .env}
+      # First-run admin password. Change it at first sign-in.
+      DIVE_ADMIN_PASSWORD: ${DIVE_ADMIN_PASSWORD:-}
+      # Owner console. Leave unset to disable that screen entirely.
+      DIVE_OWNER_KEY_HASH: ${DIVE_OWNER_KEY_HASH:-}
+      # Model providers. Leave unset to run with no external calls at all.
+      ANTHROPIC_API_KEY: ${ANTHROPIC_API_KEY:-}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      # Source editing over the web is off in a hosted deployment. It is remote
+      # code execution by design; edit the repository and redeploy instead.
+      DIVE_ALLOW_SOURCE_EDITING: "false"
+    volumes:
+      - dive-data:/data
+    networks:
+      - internal
+    security_opt:
+      - no-new-privileges:true
+    deploy:
+      resources:
+        limits:
+          memory: 4G
+
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    environment:
+      # Same domain as the app, read straight into the Caddyfile.
+      DIVE_PUBLIC_HOSTNAME: ${DIVE_PUBLIC_HOSTNAME:?set DIVE_PUBLIC_HOSTNAME in .env}
+      # Let's Encrypt sends expiry warnings here.
+      DIVE_TLS_EMAIL: ${DIVE_TLS_EMAIL:?set DIVE_TLS_EMAIL in .env}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+      - caddy-config:/config
+    networks:
+      - internal
+    depends_on:
+      - dive
+
+volumes:
+  dive-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  internal:
